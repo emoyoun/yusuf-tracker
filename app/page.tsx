@@ -28,12 +28,45 @@ const initialEveningMeds: Record<EveningMedicationKey, boolean> = {
   magnesium: false,
 };
 
+const outburstTimeOptions = Array.from({ length: 48 }, (_, index) => {
+  const hour = Math.floor(index / 2);
+  const minute = index % 2 === 0 ? "00" : "30";
+  return `${hour.toString().padStart(2, "0")}:${minute}`;
+});
+
+const getTorontoOffset = () => {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Toronto",
+    timeZoneName: "shortOffset",
+  }).formatToParts(new Date());
+  const timezonePart = parts.find((part) => part.type === "timeZoneName")?.value;
+
+  if (!timezonePart) return "-05:00";
+
+  const offsetMatch = timezonePart.match(/GMT([+-]\d{1,2})(?::(\d{2}))?/);
+  if (!offsetMatch) return "-05:00";
+
+  const signAndHour = offsetMatch[1];
+  const sign = signAndHour.startsWith("-") ? "-" : "+";
+  const hours = signAndHour.replace(/[+-]/, "").padStart(2, "0");
+  const minutes = offsetMatch[2] ?? "00";
+
+  return `${sign}${hours}:${minutes}`;
+};
+
+const toTorontoTimeWithOffset = (time: string) => {
+  if (!time) return null;
+  return `${time}:00${getTorontoOffset()}`;
+};
+
 export default function Home() {
   const [sleepQuality, setSleepQuality] = useState<number>(0);
   const [morningMood, setMorningMood] = useState<MoodOption>("");
+  const [morningOutburstTime, setMorningOutburstTime] = useState<string>("");
   const [morningOutburstDuration, setMorningOutburstDuration] =
     useState<string>("");
   const [eveningMood, setEveningMood] = useState<MoodOption>("");
+  const [eveningOutburstTime, setEveningOutburstTime] = useState<string>("");
   const [eveningOutburstDuration, setEveningOutburstDuration] =
     useState<string>("");
   const [morningAppetite, setMorningAppetite] = useState<AppetiteOption>("");
@@ -62,8 +95,10 @@ export default function Home() {
   const resetForm = () => {
     setSleepQuality(0);
     setMorningMood("");
+    setMorningOutburstTime("");
     setMorningOutburstDuration("");
     setEveningMood("");
+    setEveningOutburstTime("");
     setEveningOutburstDuration("");
     setMorningAppetite("");
     setEveningAppetite("");
@@ -92,12 +127,20 @@ export default function Home() {
           morningMood === "Outburst" && morningOutburstDuration
             ? Number.parseInt(morningOutburstDuration, 10)
             : null,
+        morning_outburst_time:
+          morningMood === "Outburst" && morningOutburstTime
+            ? toTorontoTimeWithOffset(morningOutburstTime)
+            : null,
         morning_appetite: morningAppetite || null,
         morning_meds: morningMeds,
         evening_mood: eveningMood || null,
         evening_outburst_minutes:
           eveningMood === "Outburst" && eveningOutburstDuration
             ? Number.parseInt(eveningOutburstDuration, 10)
+            : null,
+        evening_outburst_time:
+          eveningMood === "Outburst" && eveningOutburstTime
+            ? toTorontoTimeWithOffset(eveningOutburstTime)
             : null,
         evening_appetite: eveningAppetite || null,
         evening_meds: eveningMeds,
@@ -184,21 +227,49 @@ export default function Home() {
               </div>
 
               {morningMood === "Outburst" && (
-                <div>
-                  <label
-                    htmlFor="morningOutburstDuration"
-                    className="mb-2 block text-sm font-medium text-gray-700"
-                  >
-                    Outburst Duration (minutes)
-                  </label>
-                  <input
-                    id="morningOutburstDuration"
-                    type="number"
-                    min={1}
-                    value={morningOutburstDuration}
-                    onChange={(event) => setMorningOutburstDuration(event.target.value)}
-                    className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-300"
-                  />
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <div>
+                    <label
+                      htmlFor="morningOutburstTime"
+                      className="mb-2 block text-sm font-medium text-gray-700"
+                    >
+                      Outburst Time (Toronto)
+                    </label>
+                    <select
+                      id="morningOutburstTime"
+                      value={morningOutburstTime}
+                      onChange={(event) => setMorningOutburstTime(event.target.value)}
+                      className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-300"
+                    >
+                      <option value="">Select time</option>
+                      {outburstTimeOptions.map((time) => (
+                        <option key={time} value={time}>
+                          {time}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="mt-1 text-xs text-gray-500">
+                      Saved in America/Toronto timezone.
+                    </p>
+                  </div>
+                  <div>
+                    <label
+                      htmlFor="morningOutburstDuration"
+                      className="mb-2 block text-sm font-medium text-gray-700"
+                    >
+                      Outburst Duration (minutes)
+                    </label>
+                    <input
+                      id="morningOutburstDuration"
+                      type="number"
+                      min={1}
+                      value={morningOutburstDuration}
+                      onChange={(event) =>
+                        setMorningOutburstDuration(event.target.value)
+                      }
+                      className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-300"
+                    />
+                  </div>
                 </div>
               )}
 
@@ -285,21 +356,49 @@ export default function Home() {
               </div>
 
               {eveningMood === "Outburst" && (
-                <div>
-                  <label
-                    htmlFor="eveningOutburstDuration"
-                    className="mb-2 block text-sm font-medium text-gray-700"
-                  >
-                    Outburst Duration (minutes)
-                  </label>
-                  <input
-                    id="eveningOutburstDuration"
-                    type="number"
-                    min={1}
-                    value={eveningOutburstDuration}
-                    onChange={(event) => setEveningOutburstDuration(event.target.value)}
-                    className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-300"
-                  />
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <div>
+                    <label
+                      htmlFor="eveningOutburstTime"
+                      className="mb-2 block text-sm font-medium text-gray-700"
+                    >
+                      Outburst Time (Toronto)
+                    </label>
+                    <select
+                      id="eveningOutburstTime"
+                      value={eveningOutburstTime}
+                      onChange={(event) => setEveningOutburstTime(event.target.value)}
+                      className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-300"
+                    >
+                      <option value="">Select time</option>
+                      {outburstTimeOptions.map((time) => (
+                        <option key={time} value={time}>
+                          {time}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="mt-1 text-xs text-gray-500">
+                      Saved in America/Toronto timezone.
+                    </p>
+                  </div>
+                  <div>
+                    <label
+                      htmlFor="eveningOutburstDuration"
+                      className="mb-2 block text-sm font-medium text-gray-700"
+                    >
+                      Outburst Duration (minutes)
+                    </label>
+                    <input
+                      id="eveningOutburstDuration"
+                      type="number"
+                      min={1}
+                      value={eveningOutburstDuration}
+                      onChange={(event) =>
+                        setEveningOutburstDuration(event.target.value)
+                      }
+                      className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-300"
+                    />
+                  </div>
                 </div>
               )}
 
