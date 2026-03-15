@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useState } from "react";
+import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 
 type MoodOption = "" | "Calm" | "Happy" | "Irritable" | "Energetic" | "Outburst";
@@ -175,12 +176,22 @@ export default function Home() {
   return (
     <main className="min-h-screen bg-gray-100 p-4 sm:p-6">
       <div className="mx-auto w-full max-w-xl rounded-2xl bg-white p-6 shadow-sm ring-1 ring-gray-200 sm:p-8">
-        <h1 className="text-2xl font-bold tracking-tight text-gray-900">
-          Yusuf&apos;s Daily Log
-        </h1>
-        <p className="mt-1 text-sm text-gray-500">
-          Record key updates from today in one place.
-        </p>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight text-gray-900">
+              Yusuf&apos;s Daily Log
+            </h1>
+            <p className="mt-1 text-sm text-gray-500">
+              Record key updates from today in one place.
+            </p>
+          </div>
+          <Link
+            href="/history"
+            className="inline-flex items-center justify-center rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50"
+          >
+            View History Charts
+          </Link>
+        </div>
 
         <form onSubmit={handleSubmit} className="mt-6 space-y-6">
           <section>
