@@ -59,6 +59,11 @@ const toTorontoTimeWithOffset = (time: string) => {
   return `${time}:00${getTorontoOffset()}`;
 };
 
+const getTorontoDate = () =>
+  new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Toronto",
+  }).format(new Date());
+
 export default function Home() {
   const [sleepQuality, setSleepQuality] = useState<number>(0);
   const [morningMood, setMorningMood] = useState<MoodOption>("");
@@ -120,32 +125,38 @@ export default function Home() {
     setIsSaving(true);
 
     try {
-      const { error } = await supabase.from("daily_logs").insert({
-        sleep_quality: sleepQuality > 0 ? sleepQuality : null,
-        morning_mood: morningMood || null,
-        morning_outburst_minutes:
-          morningMood === "Outburst" && morningOutburstDuration
-            ? Number.parseInt(morningOutburstDuration, 10)
-            : null,
-        morning_outburst_time:
-          morningMood === "Outburst" && morningOutburstTime
-            ? toTorontoTimeWithOffset(morningOutburstTime)
-            : null,
-        morning_appetite: morningAppetite || null,
-        morning_meds: morningMeds,
-        evening_mood: eveningMood || null,
-        evening_outburst_minutes:
-          eveningMood === "Outburst" && eveningOutburstDuration
-            ? Number.parseInt(eveningOutburstDuration, 10)
-            : null,
-        evening_outburst_time:
-          eveningMood === "Outburst" && eveningOutburstTime
-            ? toTorontoTimeWithOffset(eveningOutburstTime)
-            : null,
-        evening_appetite: eveningAppetite || null,
-        evening_meds: eveningMeds,
-        notes: notes.trim() || null,
-      });
+      const { error } = await supabase.from("daily_logs").upsert(
+        {
+          log_date: getTorontoDate(),
+          sleep_quality: sleepQuality > 0 ? sleepQuality : null,
+          morning_mood: morningMood || null,
+          morning_outburst_minutes:
+            morningMood === "Outburst" && morningOutburstDuration
+              ? Number.parseInt(morningOutburstDuration, 10)
+              : null,
+          morning_outburst_time:
+            morningMood === "Outburst" && morningOutburstTime
+              ? toTorontoTimeWithOffset(morningOutburstTime)
+              : null,
+          morning_appetite: morningAppetite || null,
+          morning_meds: morningMeds,
+          evening_mood: eveningMood || null,
+          evening_outburst_minutes:
+            eveningMood === "Outburst" && eveningOutburstDuration
+              ? Number.parseInt(eveningOutburstDuration, 10)
+              : null,
+          evening_outburst_time:
+            eveningMood === "Outburst" && eveningOutburstTime
+              ? toTorontoTimeWithOffset(eveningOutburstTime)
+              : null,
+          evening_appetite: eveningAppetite || null,
+          evening_meds: eveningMeds,
+          notes: notes.trim() || null,
+        },
+        {
+          onConflict: "log_date",
+        },
+      );
 
       if (error) {
         alert(`Failed to save log: ${error.message}`);
