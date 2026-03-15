@@ -1,7 +1,7 @@
 "use client";
 
-import { FormEvent, useState } from "react";
 import Link from "next/link";
+import { FormEvent, useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 
 type MoodOption = "" | "Calm" | "Happy" | "Irritable" | "Energetic" | "Outburst";
@@ -13,6 +13,22 @@ type MorningMedicationKey =
   | "nac"
   | "atomoxetine";
 type EveningMedicationKey = "atomoxetine" | "leucovorin" | "nac" | "magnesium";
+
+type DailyLogRecord = {
+  log_date: string;
+  sleep_quality: number | null;
+  morning_mood: Exclude<MoodOption, ""> | null;
+  morning_outburst_minutes: number | null;
+  morning_outburst_time: string | null;
+  morning_appetite: Exclude<AppetiteOption, ""> | null;
+  morning_meds: Record<MorningMedicationKey, boolean> | null;
+  evening_mood: Exclude<MoodOption, ""> | null;
+  evening_outburst_minutes: number | null;
+  evening_outburst_time: string | null;
+  evening_appetite: Exclude<AppetiteOption, ""> | null;
+  evening_meds: Record<EveningMedicationKey, boolean> | null;
+  notes: string | null;
+};
 
 const initialMorningMeds: Record<MorningMedicationKey, boolean> = {
   leucovorin: false,
@@ -65,6 +81,39 @@ const getTorontoDate = () =>
     timeZone: "America/Toronto",
   }).format(new Date());
 
+const fromStoredTimeToDropdown = (value: string | null) => {
+  if (!value) return "";
+  return value.slice(0, 5);
+};
+
+const normalizeMorningMeds = (
+  value: DailyLogRecord["morning_meds"],
+): Record<MorningMedicationKey, boolean> => ({
+  leucovorin: Boolean(value?.leucovorin),
+  omega3: Boolean(value?.omega3),
+  b12: Boolean(value?.b12),
+  nac: Boolean(value?.nac),
+  atomoxetine: Boolean(value?.atomoxetine),
+});
+
+const normalizeEveningMeds = (
+  value: DailyLogRecord["evening_meds"],
+): Record<EveningMedicationKey, boolean> => ({
+  atomoxetine: Boolean(value?.atomoxetine),
+  leucovorin: Boolean(value?.leucovorin),
+  nac: Boolean(value?.nac),
+  magnesium: Boolean(value?.magnesium),
+});
+
+const hasAnyMedication = (meds: Record<string, boolean> | null) =>
+  !!meds && Object.values(meds).some(Boolean);
+
+const SavedBadge = () => (
+  <span className="ml-2 rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-800">
+    Updated today
+  </span>
+);
+
 export default function Home() {
   const [sleepQuality, setSleepQuality] = useState<number>(0);
   const [morningMood, setMorningMood] = useState<MoodOption>("");
@@ -83,8 +132,79 @@ export default function Home() {
     useState<Record<EveningMedicationKey, boolean>>(initialEveningMeds);
   const [notes, setNotes] = useState<string>("");
   const [isSaving, setIsSaving] = useState<boolean>(false);
+  const [isLoadingToday, setIsLoadingToday] = useState<boolean>(true);
+  const [todaysLog, setTodaysLog] = useState<DailyLogRecord | null>(null);
+  const [morningMedsTouched, setMorningMedsTouched] = useState<boolean>(false);
+  const [eveningMedsTouched, setEveningMedsTouched] = useState<boolean>(false);
+
+  const applyRecordToForm = (record: DailyLogRecord | null) => {
+    if (!record) {
+      setSleepQuality(0);
+      setMorningMood("");
+      setMorningOutburstTime("");
+      setMorningOutburstDuration("");
+      setEveningMood("");
+      setEveningOutburstTime("");
+      setEveningOutburstDuration("");
+      setMorningAppetite("");
+      setEveningAppetite("");
+      setMorningMeds({ ...initialMorningMeds });
+      setEveningMeds({ ...initialEveningMeds });
+      setNotes("");
+      setMorningMedsTouched(false);
+      setEveningMedsTouched(false);
+      return;
+    }
+
+    setSleepQuality(record.sleep_quality ?? 0);
+    setMorningMood(record.morning_mood ?? "");
+    setMorningOutburstTime(fromStoredTimeToDropdown(record.morning_outburst_time));
+    setMorningOutburstDuration(
+      record.morning_outburst_minutes ? String(record.morning_outburst_minutes) : "",
+    );
+    setEveningMood(record.evening_mood ?? "");
+    setEveningOutburstTime(fromStoredTimeToDropdown(record.evening_outburst_time));
+    setEveningOutburstDuration(
+      record.evening_outburst_minutes ? String(record.evening_outburst_minutes) : "",
+    );
+    setMorningAppetite(record.morning_appetite ?? "");
+    setEveningAppetite(record.evening_appetite ?? "");
+    setMorningMeds(normalizeMorningMeds(record.morning_meds));
+    setEveningMeds(normalizeEveningMeds(record.evening_meds));
+    setNotes(record.notes ?? "");
+    setMorningMedsTouched(false);
+    setEveningMedsTouched(false);
+  };
+
+  useEffect(() => {
+    const loadTodayLog = async () => {
+      if (!supabase) {
+        setIsLoadingToday(false);
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from("daily_logs")
+        .select(
+          "log_date, sleep_quality, morning_mood, morning_outburst_minutes, morning_outburst_time, morning_appetite, morning_meds, evening_mood, evening_outburst_minutes, evening_outburst_time, evening_appetite, evening_meds, notes",
+        )
+        .eq("log_date", getTorontoDate())
+        .maybeSingle();
+
+      if (!error && data) {
+        const record = data as DailyLogRecord;
+        setTodaysLog(record);
+        applyRecordToForm(record);
+      }
+
+      setIsLoadingToday(false);
+    };
+
+    void loadTodayLog();
+  }, []);
 
   const handleMorningMedicationChange = (key: MorningMedicationKey) => {
+    setMorningMedsTouched(true);
     setMorningMeds((prev) => ({
       ...prev,
       [key]: !prev[key],
@@ -92,25 +212,11 @@ export default function Home() {
   };
 
   const handleEveningMedicationChange = (key: EveningMedicationKey) => {
+    setEveningMedsTouched(true);
     setEveningMeds((prev) => ({
       ...prev,
       [key]: !prev[key],
     }));
-  };
-
-  const resetForm = () => {
-    setSleepQuality(0);
-    setMorningMood("");
-    setMorningOutburstTime("");
-    setMorningOutburstDuration("");
-    setEveningMood("");
-    setEveningOutburstTime("");
-    setEveningOutburstDuration("");
-    setMorningAppetite("");
-    setEveningAppetite("");
-    setMorningMeds({ ...initialMorningMeds });
-    setEveningMeds({ ...initialEveningMeds });
-    setNotes("");
   };
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
@@ -125,47 +231,67 @@ export default function Home() {
 
     setIsSaving(true);
 
+    const resolvedMorningMood = morningMood || todaysLog?.morning_mood || null;
+    const resolvedEveningMood = eveningMood || todaysLog?.evening_mood || null;
+
+    const payload: Omit<DailyLogRecord, "id" | "created_at"> = {
+      log_date: getTorontoDate(),
+      sleep_quality: sleepQuality > 0 ? sleepQuality : (todaysLog?.sleep_quality ?? null),
+      morning_mood: resolvedMorningMood,
+      morning_outburst_minutes:
+        resolvedMorningMood === "Outburst"
+          ? morningOutburstDuration
+            ? Number.parseInt(morningOutburstDuration, 10)
+            : (todaysLog?.morning_outburst_minutes ?? null)
+          : null,
+      morning_outburst_time:
+        resolvedMorningMood === "Outburst"
+          ? morningOutburstTime
+            ? toTorontoTimeWithOffset(morningOutburstTime)
+            : (todaysLog?.morning_outburst_time ?? null)
+          : null,
+      morning_appetite: morningAppetite || todaysLog?.morning_appetite || null,
+      morning_meds: morningMedsTouched
+        ? morningMeds
+        : (todaysLog?.morning_meds ?? null),
+      evening_mood: resolvedEveningMood,
+      evening_outburst_minutes:
+        resolvedEveningMood === "Outburst"
+          ? eveningOutburstDuration
+            ? Number.parseInt(eveningOutburstDuration, 10)
+            : (todaysLog?.evening_outburst_minutes ?? null)
+          : null,
+      evening_outburst_time:
+        resolvedEveningMood === "Outburst"
+          ? eveningOutburstTime
+            ? toTorontoTimeWithOffset(eveningOutburstTime)
+            : (todaysLog?.evening_outburst_time ?? null)
+          : null,
+      evening_appetite: eveningAppetite || todaysLog?.evening_appetite || null,
+      evening_meds: eveningMedsTouched
+        ? eveningMeds
+        : (todaysLog?.evening_meds ?? null),
+      notes: notes.trim() || todaysLog?.notes || null,
+    };
+
     try {
-      const { error } = await supabase.from("daily_logs").upsert(
-        {
-          log_date: getTorontoDate(),
-          sleep_quality: sleepQuality > 0 ? sleepQuality : null,
-          morning_mood: morningMood || null,
-          morning_outburst_minutes:
-            morningMood === "Outburst" && morningOutburstDuration
-              ? Number.parseInt(morningOutburstDuration, 10)
-              : null,
-          morning_outburst_time:
-            morningMood === "Outburst" && morningOutburstTime
-              ? toTorontoTimeWithOffset(morningOutburstTime)
-              : null,
-          morning_appetite: morningAppetite || null,
-          morning_meds: morningMeds,
-          evening_mood: eveningMood || null,
-          evening_outburst_minutes:
-            eveningMood === "Outburst" && eveningOutburstDuration
-              ? Number.parseInt(eveningOutburstDuration, 10)
-              : null,
-          evening_outburst_time:
-            eveningMood === "Outburst" && eveningOutburstTime
-              ? toTorontoTimeWithOffset(eveningOutburstTime)
-              : null,
-          evening_appetite: eveningAppetite || null,
-          evening_meds: eveningMeds,
-          notes: notes.trim() || null,
-        },
-        {
-          onConflict: "log_date",
-        },
-      );
+      const { error, data } = await supabase
+        .from("daily_logs")
+        .upsert(payload, { onConflict: "log_date" })
+        .select(
+          "log_date, sleep_quality, morning_mood, morning_outburst_minutes, morning_outburst_time, morning_appetite, morning_meds, evening_mood, evening_outburst_minutes, evening_outburst_time, evening_appetite, evening_meds, notes",
+        )
+        .single();
 
       if (error) {
         alert(`Failed to save log: ${error.message}`);
         return;
       }
 
+      const savedRecord = data as DailyLogRecord;
+      setTodaysLog(savedRecord);
+      applyRecordToForm(savedRecord);
       alert("Log Saved!");
-      resetForm();
     } catch {
       alert("Failed to save log due to a network error.");
     } finally {
@@ -193,10 +319,22 @@ export default function Home() {
           </Link>
         </div>
 
+        {isLoadingToday && (
+          <p className="mt-4 text-sm text-gray-500">Loading today&apos;s saved log...</p>
+        )}
+
+        {!isLoadingToday && todaysLog && (
+          <p className="mt-4 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+            You already have an entry for today. Leaving fields blank will keep the
+            previous value.
+          </p>
+        )}
+
         <form onSubmit={handleSubmit} className="mt-6 space-y-6">
           <section>
             <label className="mb-2 block text-sm font-medium text-gray-700">
               Sleep Quality
+              {todaysLog?.sleep_quality !== null && <SavedBadge />}
             </label>
             <div className="flex items-center gap-2">
               {[1, 2, 3, 4, 5].map((rating) => (
@@ -232,6 +370,7 @@ export default function Home() {
                   className="mb-2 block text-sm font-medium text-gray-700"
                 >
                   Morning Mood
+                  {todaysLog?.morning_mood && <SavedBadge />}
                 </label>
                 <select
                   id="morningMood"
@@ -256,6 +395,7 @@ export default function Home() {
                       className="mb-2 block text-sm font-medium text-gray-700"
                     >
                       Outburst Time (Toronto)
+                      {todaysLog?.morning_outburst_time && <SavedBadge />}
                     </label>
                     <select
                       id="morningOutburstTime"
@@ -280,6 +420,7 @@ export default function Home() {
                       className="mb-2 block text-sm font-medium text-gray-700"
                     >
                       Outburst Duration (minutes)
+                      {todaysLog?.morning_outburst_minutes !== null && <SavedBadge />}
                     </label>
                     <input
                       id="morningOutburstDuration"
@@ -301,6 +442,7 @@ export default function Home() {
                   className="mb-2 block text-sm font-medium text-gray-700"
                 >
                   Morning Appetite
+                  {todaysLog?.morning_appetite && <SavedBadge />}
                 </label>
                 <select
                   id="morningAppetite"
@@ -320,6 +462,7 @@ export default function Home() {
               <fieldset>
                 <legend className="mb-2 text-sm font-medium text-gray-700">
                   Morning Medications
+                  {hasAnyMedication(todaysLog?.morning_meds ?? null) && <SavedBadge />}
                 </legend>
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   {[
@@ -361,6 +504,7 @@ export default function Home() {
                   className="mb-2 block text-sm font-medium text-gray-700"
                 >
                   Evening Mood
+                  {todaysLog?.evening_mood && <SavedBadge />}
                 </label>
                 <select
                   id="eveningMood"
@@ -385,6 +529,7 @@ export default function Home() {
                       className="mb-2 block text-sm font-medium text-gray-700"
                     >
                       Outburst Time (Toronto)
+                      {todaysLog?.evening_outburst_time && <SavedBadge />}
                     </label>
                     <select
                       id="eveningOutburstTime"
@@ -409,6 +554,7 @@ export default function Home() {
                       className="mb-2 block text-sm font-medium text-gray-700"
                     >
                       Outburst Duration (minutes)
+                      {todaysLog?.evening_outburst_minutes !== null && <SavedBadge />}
                     </label>
                     <input
                       id="eveningOutburstDuration"
@@ -430,6 +576,7 @@ export default function Home() {
                   className="mb-2 block text-sm font-medium text-gray-700"
                 >
                   Evening Appetite
+                  {todaysLog?.evening_appetite && <SavedBadge />}
                 </label>
                 <select
                   id="eveningAppetite"
@@ -449,6 +596,7 @@ export default function Home() {
               <fieldset>
                 <legend className="mb-2 text-sm font-medium text-gray-700">
                   Evening Medications
+                  {hasAnyMedication(todaysLog?.evening_meds ?? null) && <SavedBadge />}
                 </legend>
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   {[
@@ -485,6 +633,7 @@ export default function Home() {
               className="mb-2 block text-sm font-medium text-gray-700"
             >
               Notes
+              {todaysLog?.notes && <SavedBadge />}
             </label>
             <textarea
               id="notes"
@@ -498,8 +647,8 @@ export default function Home() {
 
           <button
             type="submit"
-            disabled={isSaving}
-            className="w-full rounded-lg bg-slate-900 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-2"
+            disabled={isSaving || isLoadingToday}
+            className="w-full rounded-lg bg-slate-900 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-70"
           >
             {isSaving ? "Saving..." : "Save Daily Log"}
           </button>
