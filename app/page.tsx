@@ -12,7 +12,48 @@ type MorningMedicationKey =
   | "b12"
   | "nac"
   | "atomoxetine";
-type EveningMedicationKey = "atomoxetine" | "leucovorin" | "nac" | "magnesium";
+type EveningMedicationKey =
+  | "atomoxetine"
+  | "leucovorin"
+  | "nac"
+  | "magnesium"
+  | "omega3";
+type MedicationKey =
+  | "leucovorin"
+  | "omega3"
+  | "b12"
+  | "nac"
+  | "atomoxetine"
+  | "magnesium";
+type DoseTimeOfDay = "morning" | "evening";
+type DoseUnit = "mg" | "ml" | "mcg";
+
+type DoseSnapshotEntry = {
+  taken: boolean;
+  dose_value: number | null;
+  dose_unit: DoseUnit | null;
+  change_id: string | null;
+};
+type MorningDoseSnapshot = Record<MorningMedicationKey, DoseSnapshotEntry>;
+type EveningDoseSnapshot = Record<EveningMedicationKey, DoseSnapshotEntry>;
+
+type DoseChangeRecord = {
+  id: string;
+  med_key: MedicationKey;
+  time_of_day: DoseTimeOfDay;
+  dose_value: number;
+  dose_unit: DoseUnit;
+  effective_date: string;
+  changed_at: string;
+  notes: string | null;
+};
+
+type ActiveDoseMap = Partial<
+  Record<
+    `${DoseTimeOfDay}:${MedicationKey}`,
+    Pick<DoseChangeRecord, "id" | "dose_value" | "dose_unit" | "effective_date">
+  >
+>;
 
 type DailyLogRecord = {
   log_date: string;
@@ -22,11 +63,13 @@ type DailyLogRecord = {
   morning_outburst_time: string | null;
   morning_appetite: Exclude<AppetiteOption, ""> | null;
   morning_meds: Record<MorningMedicationKey, boolean> | null;
+  morning_doses: MorningDoseSnapshot | null;
   evening_mood: Exclude<MoodOption, ""> | null;
   evening_outburst_minutes: number | null;
   evening_outburst_time: string | null;
   evening_appetite: Exclude<AppetiteOption, ""> | null;
   evening_meds: Record<EveningMedicationKey, boolean> | null;
+  evening_doses: EveningDoseSnapshot | null;
   notes: string | null;
 };
 
@@ -43,7 +86,24 @@ const initialEveningMeds: Record<EveningMedicationKey, boolean> = {
   leucovorin: false,
   nac: false,
   magnesium: false,
+  omega3: false,
 };
+
+const morningMedicationOptions: { key: MorningMedicationKey; label: string }[] = [
+  { key: "leucovorin", label: "Leucovorin" },
+  { key: "omega3", label: "Omega-3" },
+  { key: "b12", label: "B12" },
+  { key: "nac", label: "NAC" },
+  { key: "atomoxetine", label: "Atomoxetine" },
+];
+
+const eveningMedicationOptions: { key: EveningMedicationKey; label: string }[] = [
+  { key: "atomoxetine", label: "Atomoxetine" },
+  { key: "leucovorin", label: "Leucovorin" },
+  { key: "nac", label: "NAC" },
+  { key: "magnesium", label: "Magnesium" },
+  { key: "omega3", label: "Omega-3" },
+];
 
 const outburstTimeOptions = Array.from({ length: 48 }, (_, index) => {
   const hour = Math.floor(index / 2);
@@ -109,10 +169,41 @@ const normalizeEveningMeds = (
   leucovorin: Boolean(value?.leucovorin),
   nac: Boolean(value?.nac),
   magnesium: Boolean(value?.magnesium),
+  omega3: Boolean(value?.omega3),
 });
 
 const hasAnyMedication = (meds: Record<string, boolean> | null) =>
   !!meds && Object.values(meds).some(Boolean);
+
+const getDoseUnitForMedication = (medKey: MedicationKey): DoseUnit =>
+  medKey === "omega3" ? "ml" : medKey === "b12" ? "mcg" : "mg";
+
+const getActiveDose = (
+  activeDoses: ActiveDoseMap,
+  timeOfDay: DoseTimeOfDay,
+  medKey: MedicationKey,
+) => activeDoses[`${timeOfDay}:${medKey}`];
+
+const buildDoseSnapshot = <T extends MedicationKey>(
+  meds: Record<T, boolean>,
+  timeOfDay: DoseTimeOfDay,
+  activeDoses: ActiveDoseMap,
+): Record<T, DoseSnapshotEntry> => {
+  const entries = Object.entries(meds).map(([medKey, taken]) => {
+    const activeDose = getActiveDose(activeDoses, timeOfDay, medKey as MedicationKey);
+    return [
+      medKey,
+      {
+        taken,
+        dose_value: activeDose?.dose_value ?? null,
+        dose_unit: activeDose?.dose_unit ?? getDoseUnitForMedication(medKey as MedicationKey),
+        change_id: activeDose?.id ?? null,
+      },
+    ];
+  });
+
+  return Object.fromEntries(entries) as Record<T, DoseSnapshotEntry>;
+};
 
 const SavedBadge = () => (
   <span className="ml-2 rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-800">
@@ -140,6 +231,7 @@ export default function Home() {
   const [notes, setNotes] = useState<string>("");
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [isLoadingToday, setIsLoadingToday] = useState<boolean>(true);
+  const [activeDoses, setActiveDoses] = useState<ActiveDoseMap>({});
   const [selectedLogDate, setSelectedLogDate] = useState<string>(torontoToday);
   const [showDatePicker, setShowDatePicker] = useState<boolean>(false);
   const [todaysLog, setTodaysLog] = useState<DailyLogRecord | null>(null);
@@ -189,6 +281,7 @@ export default function Home() {
     const loadSelectedDateLog = async () => {
       setIsLoadingToday(true);
       setTodaysLog(null);
+      setActiveDoses({});
       applyRecordToForm(null);
 
       if (!supabase) {
@@ -196,18 +289,47 @@ export default function Home() {
         return;
       }
 
-      const { data, error } = await supabase
-        .from("daily_logs")
-        .select(
-          "log_date, sleep_quality, morning_mood, morning_outburst_minutes, morning_outburst_time, morning_appetite, morning_meds, evening_mood, evening_outburst_minutes, evening_outburst_time, evening_appetite, evening_meds, notes",
-        )
-        .eq("log_date", selectedLogDate)
-        .maybeSingle();
+      const [dailyLogResult, doseChangesResult] = await Promise.all([
+        supabase
+          .from("daily_logs")
+          .select(
+            "log_date, sleep_quality, morning_mood, morning_outburst_minutes, morning_outburst_time, morning_appetite, morning_meds, morning_doses, evening_mood, evening_outburst_minutes, evening_outburst_time, evening_appetite, evening_meds, evening_doses, notes",
+          )
+          .eq("log_date", selectedLogDate)
+          .maybeSingle(),
+        supabase
+          .from("medication_dose_changes")
+          .select(
+            "id, med_key, time_of_day, dose_value, dose_unit, effective_date, changed_at, notes",
+          )
+          .lte("effective_date", selectedLogDate)
+          .order("effective_date", { ascending: false })
+          .order("changed_at", { ascending: false }),
+      ]);
 
-      if (!error && data) {
-        const record = data as DailyLogRecord;
+      if (!dailyLogResult.error && dailyLogResult.data) {
+        const record = dailyLogResult.data as DailyLogRecord;
         setTodaysLog(record);
         applyRecordToForm(record);
+      }
+
+      if (!doseChangesResult.error && doseChangesResult.data) {
+        const sortedChanges = doseChangesResult.data as DoseChangeRecord[];
+        const active: ActiveDoseMap = {};
+
+        sortedChanges.forEach((change) => {
+          const key = `${change.time_of_day}:${change.med_key}` as const;
+          if (!active[key]) {
+            active[key] = {
+              id: change.id,
+              dose_value: Number(change.dose_value),
+              dose_unit: change.dose_unit,
+              effective_date: change.effective_date,
+            };
+          }
+        });
+
+        setActiveDoses(active);
       }
 
       setIsLoadingToday(false);
@@ -246,8 +368,22 @@ export default function Home() {
 
     const resolvedMorningMood = morningMood || todaysLog?.morning_mood || null;
     const resolvedEveningMood = eveningMood || todaysLog?.evening_mood || null;
+    const resolvedMorningMeds = morningMedsTouched
+      ? morningMeds
+      : (todaysLog?.morning_meds ?? null);
+    const resolvedEveningMeds = eveningMedsTouched
+      ? eveningMeds
+      : (todaysLog?.evening_meds ?? null);
+    const resolvedMorningDoses =
+      morningMedsTouched && resolvedMorningMeds
+        ? buildDoseSnapshot(resolvedMorningMeds, "morning", activeDoses)
+        : (todaysLog?.morning_doses ?? null);
+    const resolvedEveningDoses =
+      eveningMedsTouched && resolvedEveningMeds
+        ? buildDoseSnapshot(resolvedEveningMeds, "evening", activeDoses)
+        : (todaysLog?.evening_doses ?? null);
 
-    const payload: Omit<DailyLogRecord, "id" | "created_at"> = {
+    const payload: DailyLogRecord = {
       log_date: selectedLogDate,
       sleep_quality: sleepQuality > 0 ? sleepQuality : (todaysLog?.sleep_quality ?? null),
       morning_mood: resolvedMorningMood,
@@ -264,9 +400,8 @@ export default function Home() {
             : (todaysLog?.morning_outburst_time ?? null)
           : null,
       morning_appetite: morningAppetite || todaysLog?.morning_appetite || null,
-      morning_meds: morningMedsTouched
-        ? morningMeds
-        : (todaysLog?.morning_meds ?? null),
+      morning_meds: resolvedMorningMeds,
+      morning_doses: resolvedMorningDoses,
       evening_mood: resolvedEveningMood,
       evening_outburst_minutes:
         resolvedEveningMood === "Outburst"
@@ -281,9 +416,8 @@ export default function Home() {
             : (todaysLog?.evening_outburst_time ?? null)
           : null,
       evening_appetite: eveningAppetite || todaysLog?.evening_appetite || null,
-      evening_meds: eveningMedsTouched
-        ? eveningMeds
-        : (todaysLog?.evening_meds ?? null),
+      evening_meds: resolvedEveningMeds,
+      evening_doses: resolvedEveningDoses,
       notes: notes.trim() || todaysLog?.notes || null,
     };
 
@@ -292,7 +426,7 @@ export default function Home() {
         .from("daily_logs")
         .upsert(payload, { onConflict: "log_date" })
         .select(
-          "log_date, sleep_quality, morning_mood, morning_outburst_minutes, morning_outburst_time, morning_appetite, morning_meds, evening_mood, evening_outburst_minutes, evening_outburst_time, evening_appetite, evening_meds, notes",
+          "log_date, sleep_quality, morning_mood, morning_outburst_minutes, morning_outburst_time, morning_appetite, morning_meds, morning_doses, evening_mood, evening_outburst_minutes, evening_outburst_time, evening_appetite, evening_meds, evening_doses, notes",
         )
         .single();
 
@@ -324,12 +458,20 @@ export default function Home() {
               Record key updates from today in one place.
             </p>
           </div>
-          <Link
-            href="/history"
-            className="inline-flex items-center justify-center rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50"
-          >
-            View History Charts
-          </Link>
+          <div className="flex flex-wrap gap-2">
+            <Link
+              href="/doses"
+              className="inline-flex items-center justify-center rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50"
+            >
+              Manage Doses
+            </Link>
+            <Link
+              href="/history"
+              className="inline-flex items-center justify-center rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50"
+            >
+              View History Charts
+            </Link>
+          </div>
         </div>
 
         {isLoadingToday && (
@@ -520,13 +662,7 @@ export default function Home() {
                   {hasAnyMedication(todaysLog?.morning_meds ?? null) && <SavedBadge />}
                 </legend>
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  {[
-                    { key: "leucovorin", label: "Leucovorin" },
-                    { key: "omega3", label: "Omega-3" },
-                    { key: "b12", label: "B12" },
-                    { key: "nac", label: "NAC" },
-                    { key: "atomoxetine", label: "Atomoxetine" },
-                  ].map((med) => (
+                  {morningMedicationOptions.map((med) => (
                     <label
                       key={med.key}
                       className="flex cursor-pointer items-center gap-3 rounded-lg border border-gray-200 bg-white px-3 py-2"
@@ -541,7 +677,16 @@ export default function Home() {
                         }
                         className="h-4 w-4 rounded border-gray-300 text-slate-900 focus:ring-slate-600"
                       />
-                      <span className="text-sm text-gray-700">{med.label}</span>
+                      <span className="text-sm text-gray-700">
+                        {med.label}
+                        {getActiveDose(activeDoses, "morning", med.key) && (
+                          <span className="text-gray-500">
+                            {" "}
+                            - {getActiveDose(activeDoses, "morning", med.key)?.dose_value}{" "}
+                            {getActiveDose(activeDoses, "morning", med.key)?.dose_unit}
+                          </span>
+                        )}
+                      </span>
                     </label>
                   ))}
                 </div>
@@ -654,12 +799,7 @@ export default function Home() {
                   {hasAnyMedication(todaysLog?.evening_meds ?? null) && <SavedBadge />}
                 </legend>
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  {[
-                    { key: "atomoxetine", label: "Atomoxetine" },
-                    { key: "leucovorin", label: "Leucovorin" },
-                    { key: "nac", label: "NAC" },
-                    { key: "magnesium", label: "Magnesium" },
-                  ].map((med) => (
+                  {eveningMedicationOptions.map((med) => (
                     <label
                       key={med.key}
                       className="flex cursor-pointer items-center gap-3 rounded-lg border border-gray-200 bg-white px-3 py-2"
@@ -674,7 +814,16 @@ export default function Home() {
                         }
                         className="h-4 w-4 rounded border-gray-300 text-slate-900 focus:ring-slate-600"
                       />
-                      <span className="text-sm text-gray-700">{med.label}</span>
+                      <span className="text-sm text-gray-700">
+                        {med.label}
+                        {getActiveDose(activeDoses, "evening", med.key) && (
+                          <span className="text-gray-500">
+                            {" "}
+                            - {getActiveDose(activeDoses, "evening", med.key)?.dose_value}{" "}
+                            {getActiveDose(activeDoses, "evening", med.key)?.dose_unit}
+                          </span>
+                        )}
+                      </span>
                     </label>
                   ))}
                 </div>
