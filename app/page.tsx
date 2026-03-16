@@ -334,7 +334,7 @@ export default function Home() {
           <section>
             <label className="mb-2 block text-sm font-medium text-gray-700">
               Sleep Quality
-              {todaysLog?.sleep_quality !== null && <SavedBadge />}
+              {todaysLog?.sleep_quality != null && <SavedBadge />}
             </label>
             <div className="flex items-center gap-2">
               {[1, 2, 3, 4, 5].map((rating) => (
@@ -420,7 +420,7 @@ export default function Home() {
                       className="mb-2 block text-sm font-medium text-gray-700"
                     >
                       Outburst Duration (minutes)
-                      {todaysLog?.morning_outburst_minutes !== null && <SavedBadge />}
+                      {todaysLog?.morning_outburst_minutes != null && <SavedBadge />}
                     </label>
                     <input
                       id="morningOutburstDuration"
@@ -554,7 +554,7 @@ export default function Home() {
                       className="mb-2 block text-sm font-medium text-gray-700"
                     >
                       Outburst Duration (minutes)
-                      {todaysLog?.evening_outburst_minutes !== null && <SavedBadge />}
+                      {todaysLog?.evening_outburst_minutes != null && <SavedBadge />}
                     </label>
                     <input
                       id="eveningOutburstDuration"
