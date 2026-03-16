@@ -81,6 +81,12 @@ const getTorontoDate = () =>
     timeZone: "America/Toronto",
   }).format(new Date());
 
+const formatTorontoDateLabel = (date: string) =>
+  new Intl.DateTimeFormat("en-CA", {
+    dateStyle: "medium",
+    timeZone: "America/Toronto",
+  }).format(new Date(`${date}T00:00:00`));
+
 const fromStoredTimeToDropdown = (value: string | null) => {
   if (!value) return "";
   return value.slice(0, 5);
@@ -110,11 +116,12 @@ const hasAnyMedication = (meds: Record<string, boolean> | null) =>
 
 const SavedBadge = () => (
   <span className="ml-2 rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-800">
-    Updated today
+    Saved for this date
   </span>
 );
 
 export default function Home() {
+  const torontoToday = getTorontoDate();
   const [sleepQuality, setSleepQuality] = useState<number>(0);
   const [morningMood, setMorningMood] = useState<MoodOption>("");
   const [morningOutburstTime, setMorningOutburstTime] = useState<string>("");
@@ -133,6 +140,8 @@ export default function Home() {
   const [notes, setNotes] = useState<string>("");
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [isLoadingToday, setIsLoadingToday] = useState<boolean>(true);
+  const [selectedLogDate, setSelectedLogDate] = useState<string>(torontoToday);
+  const [showDatePicker, setShowDatePicker] = useState<boolean>(false);
   const [todaysLog, setTodaysLog] = useState<DailyLogRecord | null>(null);
   const [morningMedsTouched, setMorningMedsTouched] = useState<boolean>(false);
   const [eveningMedsTouched, setEveningMedsTouched] = useState<boolean>(false);
@@ -177,7 +186,11 @@ export default function Home() {
   };
 
   useEffect(() => {
-    const loadTodayLog = async () => {
+    const loadSelectedDateLog = async () => {
+      setIsLoadingToday(true);
+      setTodaysLog(null);
+      applyRecordToForm(null);
+
       if (!supabase) {
         setIsLoadingToday(false);
         return;
@@ -188,7 +201,7 @@ export default function Home() {
         .select(
           "log_date, sleep_quality, morning_mood, morning_outburst_minutes, morning_outburst_time, morning_appetite, morning_meds, evening_mood, evening_outburst_minutes, evening_outburst_time, evening_appetite, evening_meds, notes",
         )
-        .eq("log_date", getTorontoDate())
+        .eq("log_date", selectedLogDate)
         .maybeSingle();
 
       if (!error && data) {
@@ -200,8 +213,8 @@ export default function Home() {
       setIsLoadingToday(false);
     };
 
-    void loadTodayLog();
-  }, []);
+    void loadSelectedDateLog();
+  }, [selectedLogDate]);
 
   const handleMorningMedicationChange = (key: MorningMedicationKey) => {
     setMorningMedsTouched(true);
@@ -235,7 +248,7 @@ export default function Home() {
     const resolvedEveningMood = eveningMood || todaysLog?.evening_mood || null;
 
     const payload: Omit<DailyLogRecord, "id" | "created_at"> = {
-      log_date: getTorontoDate(),
+      log_date: selectedLogDate,
       sleep_quality: sleepQuality > 0 ? sleepQuality : (todaysLog?.sleep_quality ?? null),
       morning_mood: resolvedMorningMood,
       morning_outburst_minutes:
@@ -325,10 +338,52 @@ export default function Home() {
 
         {!isLoadingToday && todaysLog && (
           <p className="mt-4 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
-            You already have an entry for today. Leaving fields blank will keep the
-            previous value.
+            Entry exists for {formatTorontoDateLabel(selectedLogDate)}. Leaving
+            fields blank will keep the previously saved value.
           </p>
         )}
+
+        <div className="mt-4 rounded-lg border border-gray-200 bg-gray-50 p-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setShowDatePicker((prev) => !prev)}
+              className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-100"
+            >
+              {showDatePicker ? "Hide Date Picker" : "Fill Previous Date"}
+            </button>
+            {selectedLogDate !== torontoToday && (
+              <button
+                type="button"
+                onClick={() => setSelectedLogDate(torontoToday)}
+                className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-100"
+              >
+                Back to Today
+              </button>
+            )}
+            <span className="text-sm text-gray-600">
+              Editing: {formatTorontoDateLabel(selectedLogDate)}
+            </span>
+          </div>
+          {showDatePicker && (
+            <div className="mt-3">
+              <label
+                htmlFor="logDate"
+                className="mb-1 block text-sm font-medium text-gray-700"
+              >
+                Select date to edit
+              </label>
+              <input
+                id="logDate"
+                type="date"
+                value={selectedLogDate}
+                max={torontoToday}
+                onChange={(event) => setSelectedLogDate(event.target.value)}
+                className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-300"
+              />
+            </div>
+          )}
+        </div>
 
         <form onSubmit={handleSubmit} className="mt-6 space-y-6">
           <section>
