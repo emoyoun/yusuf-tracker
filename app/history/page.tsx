@@ -22,6 +22,7 @@ import {
 import { supabase } from "@/lib/supabase";
 
 type MoodOption = "Calm" | "Happy" | "Irritable" | "Energetic" | "Outburst";
+type AppetiteOption = "Low" | "Normal" | "High";
 type MedicationKey =
   | "leucovorin"
   | "omega3"
@@ -36,6 +37,7 @@ type DailyLogRow = {
   sleep_quality: number | null;
   morning_outburst_minutes: number | null;
   evening_outburst_minutes: number | null;
+  evening_appetite: AppetiteOption | null;
   morning_mood: MoodOption | null;
   evening_mood: MoodOption | null;
   morning_meds: MedicationState | null;
@@ -47,6 +49,8 @@ type ChartRow = {
   sleepQuality: number | null;
   morningOutburstMinutes: number | null;
   eveningOutburstMinutes: number | null;
+  eveningAppetiteLabel: AppetiteOption | null;
+  eveningAppetiteScore: number | null;
   morningMoodLabel: MoodOption | null;
   eveningMoodLabel: MoodOption | null;
   morningMoodScore: number | null;
@@ -68,6 +72,18 @@ const moodLabelByScore: Record<number, MoodOption> = {
   3: "Energetic",
   4: "Irritable",
   5: "Outburst",
+};
+
+const appetiteScoreMap: Record<AppetiteOption, number> = {
+  Low: 1,
+  Normal: 2,
+  High: 3,
+};
+
+const appetiteLabelByScore: Record<number, AppetiteOption> = {
+  1: "Low",
+  2: "Normal",
+  3: "High",
 };
 
 const moodColorMap: Record<MoodOption, string> = {
@@ -126,7 +142,7 @@ export default function HistoryPage() {
       const { data, error: queryError } = await supabase
         .from("daily_logs")
         .select(
-          "log_date, sleep_quality, morning_outburst_minutes, evening_outburst_minutes, morning_mood, evening_mood, morning_meds, evening_meds",
+          "log_date, sleep_quality, morning_outburst_minutes, evening_outburst_minutes, evening_appetite, morning_mood, evening_mood, morning_meds, evening_meds",
         )
         .order("log_date", { ascending: true });
 
@@ -140,12 +156,17 @@ export default function HistoryPage() {
         const moodScore = log.morning_mood
           ? moodScoreMap[log.morning_mood]
           : null;
+        const appetiteScore = log.evening_appetite
+          ? appetiteScoreMap[log.evening_appetite]
+          : null;
 
         return {
           date: log.log_date,
           sleepQuality: log.sleep_quality,
           morningOutburstMinutes: log.morning_outburst_minutes,
           eveningOutburstMinutes: log.evening_outburst_minutes,
+          eveningAppetiteLabel: log.evening_appetite,
+          eveningAppetiteScore: appetiteScore,
           morningMoodLabel: log.morning_mood,
           eveningMoodLabel: log.evening_mood,
           morningMoodScore: moodScore,
@@ -373,6 +394,75 @@ export default function HistoryPage() {
                       type="monotone"
                       dataKey="sleepQuality"
                       stroke="#60a5fa"
+                      strokeWidth={2}
+                      dot={{ r: 3 }}
+                      connectNulls
+                    />
+                  </ComposedChart>
+                </ResponsiveContainer>
+              </div>
+            </section>
+
+            <section className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-gray-200 sm:p-6">
+              <h2 className="mb-4 text-lg font-semibold text-gray-900">
+                Evening Appetite and Outburst
+              </h2>
+              <div className="h-64 w-full sm:h-80">
+                <ResponsiveContainer width="100%" height="100%">
+                  <ComposedChart
+                    data={rows}
+                    margin={{ top: 8, right: 8, left: -18, bottom: 8 }}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                    <XAxis
+                      dataKey="date"
+                      tickFormatter={formatDateShort}
+                      tick={{ fontSize: 12 }}
+                      stroke="#6b7280"
+                    />
+                    <YAxis
+                      yAxisId="appetite"
+                      domain={[1, 3]}
+                      ticks={[1, 2, 3]}
+                      tickFormatter={(value) => appetiteLabelByScore[value] ?? ""}
+                      tick={{ fontSize: 12 }}
+                      stroke="#6b7280"
+                    />
+                    <YAxis
+                      yAxisId="outburst"
+                      orientation="right"
+                      allowDecimals={false}
+                      tick={{ fontSize: 12 }}
+                      stroke="#6b7280"
+                    />
+                    <Tooltip
+                      formatter={(_, name, item) => {
+                        if (name === "eveningAppetiteScore") {
+                          return [
+                            item.payload.eveningAppetiteLabel ?? "Not set",
+                            "Evening Appetite",
+                          ];
+                        }
+                        return [item.payload.eveningOutburstMinutes ?? 0, "Evening Outburst (min)"];
+                      }}
+                      labelFormatter={(label) =>
+                        new Intl.DateTimeFormat("en-CA", {
+                          dateStyle: "medium",
+                          timeZone: "America/Toronto",
+                        }).format(new Date(`${label}T00:00:00`))
+                      }
+                    />
+                    <Bar
+                      yAxisId="outburst"
+                      dataKey="eveningOutburstMinutes"
+                      fill="#fca5a5"
+                      radius={[6, 6, 0, 0]}
+                    />
+                    <Line
+                      yAxisId="appetite"
+                      type="monotone"
+                      dataKey="eveningAppetiteScore"
+                      stroke="#86efac"
                       strokeWidth={2}
                       dot={{ r: 3 }}
                       connectNulls
