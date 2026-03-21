@@ -1,9 +1,9 @@
 "use client";
 
 import { Fragment, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import {
   Bar,
-  BarChart,
   CartesianGrid,
   Cell,
   ComposedChart,
@@ -21,8 +21,16 @@ import {
 } from "recharts";
 import { supabase } from "@/lib/supabase";
 
-type MoodOption = "Calm" | "Happy" | "Irritable" | "Energetic" | "Outburst";
+type MoodOption = "Calm" | "Happy" | "Irritable" | "Energetic";
 type AppetiteOption = "Low" | "Normal" | "High";
+type OutburstTriggerOption =
+  | "Brother"
+  | "TV"
+  | "iPad"
+  | "Hunger"
+  | "Fatigue"
+  | "Sensory overload"
+  | "Communication";
 type MedicationKey =
   | "leucovorin"
   | "omega3"
@@ -35,8 +43,12 @@ type MedicationState = Partial<Record<MedicationKey, boolean>>;
 type DailyLogRow = {
   log_date: string;
   sleep_quality: number | null;
+  morning_outburst_time: string | null;
   morning_outburst_minutes: number | null;
+  morning_outburst_trigger: OutburstTriggerOption | null;
+  evening_outburst_time: string | null;
   evening_outburst_minutes: number | null;
+  evening_outburst_trigger: OutburstTriggerOption | null;
   evening_appetite: AppetiteOption | null;
   morning_mood: MoodOption | null;
   evening_mood: MoodOption | null;
@@ -47,31 +59,18 @@ type DailyLogRow = {
 type ChartRow = {
   date: string;
   sleepQuality: number | null;
+  morningOutburstTime: string | null;
   morningOutburstMinutes: number | null;
+  morningOutburstTrigger: OutburstTriggerOption | null;
+  eveningOutburstTime: string | null;
   eveningOutburstMinutes: number | null;
+  eveningOutburstTrigger: OutburstTriggerOption | null;
   eveningAppetiteLabel: AppetiteOption | null;
   eveningAppetiteScore: number | null;
   morningMoodLabel: MoodOption | null;
   eveningMoodLabel: MoodOption | null;
-  morningMoodScore: number | null;
   morningMeds: MedicationState | null;
   eveningMeds: MedicationState | null;
-};
-
-const moodScoreMap: Record<MoodOption, number> = {
-  Calm: 1,
-  Happy: 2,
-  Energetic: 3,
-  Irritable: 4,
-  Outburst: 5,
-};
-
-const moodLabelByScore: Record<number, MoodOption> = {
-  1: "Calm",
-  2: "Happy",
-  3: "Energetic",
-  4: "Irritable",
-  5: "Outburst",
 };
 
 const appetiteScoreMap: Record<AppetiteOption, number> = {
@@ -91,7 +90,16 @@ const moodColorMap: Record<MoodOption, string> = {
   Happy: "#22c55e",
   Irritable: "#f97316",
   Energetic: "#a78bfa",
-  Outburst: "#ef4444",
+};
+
+const triggerColorMap: Record<OutburstTriggerOption, string> = {
+  Brother: "#3b82f6",
+  TV: "#22c55e",
+  iPad: "#8b5cf6",
+  Hunger: "#f97316",
+  Fatigue: "#64748b",
+  "Sensory overload": "#ec4899",
+  Communication: "#f59e0b",
 };
 
 const formatDateShort = (value: string) => {
@@ -109,6 +117,19 @@ const formatDateShortFromTimestamp = (value: number) =>
     day: "numeric",
     timeZone: "America/Toronto",
   }).format(new Date(value));
+
+const parseOutburstTimeToMinutes = (value: string | null) => {
+  if (!value) return null;
+  const match = value.match(/^(\d{2}):(\d{2})/);
+  if (!match) return null;
+  return Number.parseInt(match[1], 10) * 60 + Number.parseInt(match[2], 10);
+};
+
+const formatMinutesToTime = (value: number) => {
+  const hours = Math.floor(value / 60);
+  const minutes = value % 60;
+  return `${hours.toString().padStart(2, "0")}:${minutes.toString().padStart(2, "0")}`;
+};
 
 const getTorontoDateString = () =>
   new Intl.DateTimeFormat("en-CA", {
@@ -142,7 +163,7 @@ export default function HistoryPage() {
       const { data, error: queryError } = await supabase
         .from("daily_logs")
         .select(
-          "log_date, sleep_quality, morning_outburst_minutes, evening_outburst_minutes, evening_appetite, morning_mood, evening_mood, morning_meds, evening_meds",
+          "log_date, sleep_quality, morning_outburst_time, morning_outburst_minutes, morning_outburst_trigger, evening_outburst_time, evening_outburst_minutes, evening_outburst_trigger, evening_appetite, morning_mood, evening_mood, morning_meds, evening_meds",
         )
         .order("log_date", { ascending: true });
 
@@ -153,9 +174,6 @@ export default function HistoryPage() {
       }
 
       const mappedRows: ChartRow[] = (data as DailyLogRow[]).map((log) => {
-        const moodScore = log.morning_mood
-          ? moodScoreMap[log.morning_mood]
-          : null;
         const appetiteScore = log.evening_appetite
           ? appetiteScoreMap[log.evening_appetite]
           : null;
@@ -163,13 +181,16 @@ export default function HistoryPage() {
         return {
           date: log.log_date,
           sleepQuality: log.sleep_quality,
+          morningOutburstTime: log.morning_outburst_time,
           morningOutburstMinutes: log.morning_outburst_minutes,
+          morningOutburstTrigger: log.morning_outburst_trigger,
+          eveningOutburstTime: log.evening_outburst_time,
           eveningOutburstMinutes: log.evening_outburst_minutes,
+          eveningOutburstTrigger: log.evening_outburst_trigger,
           eveningAppetiteLabel: log.evening_appetite,
           eveningAppetiteScore: appetiteScore,
           morningMoodLabel: log.morning_mood,
           eveningMoodLabel: log.evening_mood,
-          morningMoodScore: moodScore,
           morningMeds: log.morning_meds,
           eveningMeds: log.evening_meds,
         };
@@ -195,14 +216,12 @@ export default function HistoryPage() {
       Happy: 0,
       Irritable: 0,
       Energetic: 0,
-      Outburst: 0,
     };
     const eveningCounts: Record<MoodOption, number> = {
       Calm: 0,
       Happy: 0,
       Irritable: 0,
       Energetic: 0,
-      Outburst: 0,
     };
 
     rows
@@ -282,6 +301,75 @@ export default function HistoryPage() {
       end: { x: endX, y: endY },
     };
   }, [eveningOutburstScatterData]);
+  const triggerTimelineData = useMemo(() => {
+    const minTimestamp = last30DayStart.getTime();
+    const points: {
+      timestamp: number;
+      outburstTimeMinutes: number;
+      trigger: OutburstTriggerOption;
+      period: "Morning" | "Evening";
+      durationMinutes: number | null;
+      date: string;
+    }[] = [];
+
+    rows.forEach((row) => {
+      const timestamp = new Date(`${row.date}T00:00:00`).getTime();
+      if (timestamp < minTimestamp) return;
+
+      const morningMinutes = parseOutburstTimeToMinutes(row.morningOutburstTime);
+      if (row.morningOutburstTrigger && morningMinutes != null) {
+        points.push({
+          timestamp,
+          outburstTimeMinutes: morningMinutes,
+          trigger: row.morningOutburstTrigger,
+          period: "Morning",
+          durationMinutes: row.morningOutburstMinutes,
+          date: row.date,
+        });
+      }
+
+      const eveningMinutes = parseOutburstTimeToMinutes(row.eveningOutburstTime);
+      if (row.eveningOutburstTrigger && eveningMinutes != null) {
+        points.push({
+          timestamp,
+          outburstTimeMinutes: eveningMinutes,
+          trigger: row.eveningOutburstTrigger,
+          period: "Evening",
+          durationMinutes: row.eveningOutburstMinutes,
+          date: row.date,
+        });
+      }
+    });
+
+    return points.sort((a, b) => a.timestamp - b.timestamp);
+  }, [last30DayStart, rows]);
+  const triggerFrequencyData = useMemo(() => {
+    const minTimestamp = last30DayStart.getTime();
+    const counts: Record<OutburstTriggerOption, number> = {
+      Brother: 0,
+      TV: 0,
+      iPad: 0,
+      Hunger: 0,
+      Fatigue: 0,
+      "Sensory overload": 0,
+      Communication: 0,
+    };
+
+    rows.forEach((row) => {
+      const timestamp = new Date(`${row.date}T00:00:00`).getTime();
+      if (timestamp < minTimestamp) return;
+      if (row.morningOutburstTrigger) counts[row.morningOutburstTrigger] += 1;
+      if (row.eveningOutburstTrigger) counts[row.eveningOutburstTrigger] += 1;
+    });
+
+    return (Object.keys(counts) as OutburstTriggerOption[])
+      .map((trigger) => ({
+        name: trigger,
+        value: counts[trigger],
+        color: triggerColorMap[trigger],
+      }))
+      .filter((item) => item.value > 0);
+  }, [last30DayStart, rows]);
   const last7Dates = useMemo(() => {
     const torontoToday = new Date(`${getTorontoDateString()}T00:00:00`);
     return Array.from({ length: 7 }, (_, index) => {
@@ -308,12 +396,22 @@ export default function HistoryPage() {
     <main className="min-h-screen bg-gray-100 p-4 sm:p-6">
       <div className="mx-auto w-full max-w-4xl space-y-4">
         <header className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-gray-200 sm:p-6">
-          <h1 className="text-2xl font-bold tracking-tight text-gray-900">
-            Daily History
-          </h1>
-          <p className="mt-1 text-sm text-gray-600">
-            Sleep quality and morning mood trends over time.
-          </p>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h1 className="text-2xl font-bold tracking-tight text-gray-900">
+                Daily History
+              </h1>
+              <p className="mt-1 text-sm text-gray-600">
+                Sleep quality and morning mood trends over time.
+              </p>
+            </div>
+            <Link
+              href="/"
+              className="inline-flex items-center justify-center rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50"
+            >
+              Back to Daily Log
+            </Link>
+          </div>
         </header>
 
         {loading && (
@@ -474,51 +572,6 @@ export default function HistoryPage() {
 
             <section className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-gray-200 sm:p-6">
               <h2 className="mb-4 text-lg font-semibold text-gray-900">
-                Morning Mood By Day
-              </h2>
-              <div className="h-64 w-full sm:h-80">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart
-                    data={rows}
-                    margin={{ top: 8, right: 8, left: -18, bottom: 8 }}
-                  >
-                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                    <XAxis
-                      dataKey="date"
-                      tickFormatter={formatDateShort}
-                      tick={{ fontSize: 12 }}
-                      stroke="#6b7280"
-                    />
-                    <YAxis
-                      domain={[1, 5]}
-                      ticks={[1, 2, 3, 4, 5]}
-                      tickFormatter={(value) => moodLabelByScore[value] ?? ""}
-                      tick={{ fontSize: 12 }}
-                      stroke="#6b7280"
-                    />
-                    <Tooltip
-                      formatter={(_, __, item) =>
-                        item.payload.morningMoodLabel ?? "No mood selected"
-                      }
-                      labelFormatter={(label) =>
-                        new Intl.DateTimeFormat("en-CA", {
-                          dateStyle: "medium",
-                          timeZone: "America/Toronto",
-                        }).format(new Date(`${label}T00:00:00`))
-                      }
-                    />
-                    <Bar
-                      dataKey="morningMoodScore"
-                      fill="#334155"
-                      radius={[6, 6, 0, 0]}
-                    />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            </section>
-
-            <section className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-gray-200 sm:p-6">
-              <h2 className="mb-4 text-lg font-semibold text-gray-900">
                 Mood Balance
               </h2>
               <p className="mb-2 text-sm text-gray-600">
@@ -602,6 +655,110 @@ export default function HistoryPage() {
                       </ResponsiveContainer>
                     )}
                   </div>
+                </div>
+              )}
+            </section>
+
+            <section className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-gray-200 sm:p-6">
+              <h2 className="mb-4 text-lg font-semibold text-gray-900">
+                Trigger vs Outburst Time (Last 30 Days)
+              </h2>
+              <p className="mb-2 text-sm text-gray-600">
+                Recommended view: this scatter chart highlights when each trigger tends
+                to happen during the day.
+              </p>
+              {triggerTimelineData.length === 0 ? (
+                <p className="text-sm text-gray-600">
+                  No trigger + outburst time data available yet.
+                </p>
+              ) : (
+                <div className="h-72 w-full sm:h-80">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <ScatterChart margin={{ top: 8, right: 18, left: 0, bottom: 8 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                      <XAxis
+                        type="number"
+                        dataKey="timestamp"
+                        domain={["dataMin", "dataMax"]}
+                        tickFormatter={formatDateShortFromTimestamp}
+                        tick={{ fontSize: 12 }}
+                        stroke="#6b7280"
+                      />
+                      <YAxis
+                        type="number"
+                        dataKey="outburstTimeMinutes"
+                        domain={[0, 1439]}
+                        ticks={[0, 240, 480, 720, 960, 1200, 1439]}
+                        tickFormatter={formatMinutesToTime}
+                        tick={{ fontSize: 12 }}
+                        stroke="#6b7280"
+                        label={{
+                          value: "Outburst Time",
+                          angle: -90,
+                          position: "insideLeft",
+                          style: { textAnchor: "middle", fill: "#6b7280", fontSize: 12 },
+                        }}
+                      />
+                      <Tooltip
+                        cursor={{ strokeDasharray: "3 3" }}
+                        formatter={(_, name, item) => {
+                          if (name !== "outburstTimeMinutes") return null;
+                          return [
+                            `${formatMinutesToTime(item.payload.outburstTimeMinutes)} (${item.payload.period})`,
+                            item.payload.trigger,
+                          ];
+                        }}
+                        labelFormatter={(label) =>
+                          new Intl.DateTimeFormat("en-CA", {
+                            dateStyle: "medium",
+                            timeZone: "America/Toronto",
+                          }).format(new Date(Number(label)))
+                        }
+                      />
+                      <Scatter data={triggerTimelineData} dataKey="outburstTimeMinutes">
+                        {triggerTimelineData.map((point, index) => (
+                          <Cell key={`${point.date}-${point.period}-${index}`} fill={triggerColorMap[point.trigger]} />
+                        ))}
+                      </Scatter>
+                    </ScatterChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+            </section>
+
+            <section className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-gray-200 sm:p-6">
+              <h2 className="mb-4 text-lg font-semibold text-gray-900">
+                Most Common Triggers (Last 30 Days)
+              </h2>
+              {triggerFrequencyData.length === 0 ? (
+                <p className="text-sm text-gray-600">No trigger data available yet.</p>
+              ) : (
+                <div className="h-72 w-full sm:h-80">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Tooltip
+                        formatter={(value) => [value, "Occurrences"]}
+                        labelFormatter={(label) => `Trigger: ${label}`}
+                      />
+                      <Legend
+                        verticalAlign="bottom"
+                        iconType="circle"
+                        wrapperStyle={{ fontSize: "12px" }}
+                      />
+                      <Pie
+                        data={triggerFrequencyData}
+                        dataKey="value"
+                        nameKey="name"
+                        innerRadius={45}
+                        outerRadius={95}
+                        paddingAngle={2}
+                      >
+                        {triggerFrequencyData.map((entry) => (
+                          <Cell key={entry.name} fill={entry.color} />
+                        ))}
+                      </Pie>
+                    </PieChart>
+                  </ResponsiveContainer>
                 </div>
               )}
             </section>
@@ -746,7 +903,10 @@ export default function HistoryPage() {
                       />
                       <Tooltip
                         cursor={{ strokeDasharray: "3 3" }}
-                        formatter={(value) => [value, "Outburst Duration (min)"]}
+                        formatter={(value, name) => {
+                          if (name !== "minutes") return null;
+                          return [value, "Outburst Duration (min)"];
+                        }}
                         labelFormatter={(label) =>
                           new Intl.DateTimeFormat("en-CA", {
                             dateStyle: "medium",
