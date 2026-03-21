@@ -15,7 +15,8 @@ type OutburstTriggerOption =
   | "Hunger"
   | "Fatigue"
   | "Sensory overload"
-  | "Communication";
+  | "Communication"
+  | "Medication change (timing/dose/new)";
 type MorningMedicationKey =
   | "leucovorin"
   | "omega3"
@@ -133,6 +134,7 @@ const outburstTriggerOptions: Exclude<OutburstTriggerOption, "">[] = [
   "Fatigue",
   "Sensory overload",
   "Communication",
+  "Medication change (timing/dose/new)",
 ];
 
 const getTorontoOffset = () => {

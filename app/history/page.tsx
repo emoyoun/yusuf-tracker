@@ -30,7 +30,8 @@ type OutburstTriggerOption =
   | "Hunger"
   | "Fatigue"
   | "Sensory overload"
-  | "Communication";
+  | "Communication"
+  | "Medication change (timing/dose/new)";
 type MedicationKey =
   | "leucovorin"
   | "omega3"
@@ -100,6 +101,7 @@ const triggerColorMap: Record<OutburstTriggerOption, string> = {
   Fatigue: "#64748b",
   "Sensory overload": "#ec4899",
   Communication: "#f59e0b",
+  "Medication change (timing/dose/new)": "#14b8a6",
 };
 
 const formatDateShort = (value: string) => {
@@ -353,6 +355,7 @@ export default function HistoryPage() {
       Fatigue: 0,
       "Sensory overload": 0,
       Communication: 0,
+      "Medication change (timing/dose/new)": 0,
     };
 
     rows.forEach((row) => {
