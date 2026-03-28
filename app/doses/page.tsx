@@ -10,16 +10,18 @@ type MedicationKey =
   | "b12"
   | "nac"
   | "atomoxetine"
-  | "magnesium";
+  | "magnesium"
+  | "allkidz_probiotic";
 type DoseTimeOfDay = "morning" | "evening";
-type DoseUnit = "mg" | "ml" | "mcg";
+type DoseUnit = "mg" | "ml" | "mcg" | "gummies";
 
 type DoseChangeRecord = {
   id: string;
   med_key: MedicationKey;
   time_of_day: DoseTimeOfDay;
-  dose_value: number;
-  dose_unit: DoseUnit;
+  is_active: boolean;
+  dose_value: number | null;
+  dose_unit: DoseUnit | null;
   effective_date: string;
   changed_at: string;
   notes: string | null;
@@ -32,6 +34,7 @@ const medicationOptions: { key: MedicationKey; label: string }[] = [
   { key: "nac", label: "NAC" },
   { key: "atomoxetine", label: "Atomoxetine" },
   { key: "magnesium", label: "Magnesium" },
+  { key: "allkidz_probiotic", label: "AllKiDz Probiotic" },
 ];
 
 const getTorontoDate = () =>
@@ -40,11 +43,18 @@ const getTorontoDate = () =>
   }).format(new Date());
 
 const getDoseUnitForMedication = (medKey: MedicationKey): DoseUnit =>
-  medKey === "omega3" ? "ml" : medKey === "b12" ? "mcg" : "mg";
+  medKey === "omega3"
+    ? "ml"
+    : medKey === "b12"
+      ? "mcg"
+      : medKey === "allkidz_probiotic"
+        ? "gummies"
+        : "mg";
 
 export default function DosesPage() {
   const [medKey, setMedKey] = useState<MedicationKey>("leucovorin");
   const [timeOfDay, setTimeOfDay] = useState<DoseTimeOfDay>("morning");
+  const [isStopped, setIsStopped] = useState<boolean>(false);
   const [doseValue, setDoseValue] = useState<string>("");
   const [effectiveDate, setEffectiveDate] = useState<string>(getTorontoDate());
   const [notes, setNotes] = useState<string>("");
@@ -66,7 +76,9 @@ export default function DosesPage() {
     setIsLoading(true);
     const { data, error: queryError } = await supabase
       .from("medication_dose_changes")
-      .select("id, med_key, time_of_day, dose_value, dose_unit, effective_date, changed_at, notes")
+      .select(
+        "id, med_key, time_of_day, is_active, dose_value, dose_unit, effective_date, changed_at, notes",
+      )
       .order("effective_date", { ascending: false })
       .order("changed_at", { ascending: false })
       .limit(200);
@@ -94,7 +106,7 @@ export default function DosesPage() {
     event.preventDefault();
     if (!supabase) return;
     const parsedDose = Number.parseFloat(doseValue);
-    if (!Number.isFinite(parsedDose) || parsedDose <= 0) {
+    if (!isStopped && (!Number.isFinite(parsedDose) || parsedDose <= 0)) {
       alert("Dose must be a number greater than 0.");
       return;
     }
@@ -103,8 +115,9 @@ export default function DosesPage() {
     const { error: insertError } = await supabase.from("medication_dose_changes").insert({
       med_key: medKey,
       time_of_day: timeOfDay,
-      dose_value: parsedDose,
-      dose_unit: selectedUnit,
+      is_active: !isStopped,
+      dose_value: isStopped ? null : parsedDose,
+      dose_unit: isStopped ? null : selectedUnit,
       effective_date: effectiveDate,
       notes: notes.trim() || null,
     });
@@ -116,6 +129,7 @@ export default function DosesPage() {
     }
 
     setDoseValue("");
+    setIsStopped(false);
     setNotes("");
     await loadChanges();
     setIsSaving(false);
@@ -194,12 +208,29 @@ export default function DosesPage() {
                 step="0.01"
                 value={doseValue}
                 onChange={(event) => setDoseValue(event.target.value)}
+                disabled={isStopped}
                 className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-300"
                 placeholder="e.g. 10"
               />
               <p className="mt-1 text-xs text-gray-500">
-                Omega-3 uses ml, B12 uses mcg, all other medications use mg.
+                Omega-3 uses ml, B12 uses mcg, AllKiDz Probiotic uses gummies,
+                all other medications use mg.
               </p>
+            </div>
+
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700">
+                Status
+              </label>
+              <label className="flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700">
+                <input
+                  type="checkbox"
+                  checked={isStopped}
+                  onChange={(event) => setIsStopped(event.target.checked)}
+                  className="h-4 w-4 rounded border-gray-300 text-slate-900 focus:ring-slate-600"
+                />
+                Medication stopped (clear dose)
+              </label>
             </div>
 
             <div>
@@ -261,6 +292,7 @@ export default function DosesPage() {
                     <th className="px-2 py-2 font-medium">Effective Date</th>
                     <th className="px-2 py-2 font-medium">Medication</th>
                     <th className="px-2 py-2 font-medium">Time</th>
+                    <th className="px-2 py-2 font-medium">Status</th>
                     <th className="px-2 py-2 font-medium">Dose</th>
                     <th className="px-2 py-2 font-medium">Changed At</th>
                     <th className="px-2 py-2 font-medium">Notes</th>
@@ -276,7 +308,12 @@ export default function DosesPage() {
                       </td>
                       <td className="px-2 py-2 capitalize">{change.time_of_day}</td>
                       <td className="px-2 py-2">
-                        {change.dose_value} {change.dose_unit}
+                        {change.is_active ? "Active" : "Stopped"}
+                      </td>
+                      <td className="px-2 py-2">
+                        {change.is_active && change.dose_value != null && change.dose_unit
+                          ? `${change.dose_value} ${change.dose_unit}`
+                          : "-"}
                       </td>
                       <td className="px-2 py-2">
                         {new Intl.DateTimeFormat("en-CA", {

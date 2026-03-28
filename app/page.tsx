@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 
 type MoodOption = "" | "Calm" | "Happy" | "Irritable" | "Energetic";
@@ -22,22 +22,25 @@ type MorningMedicationKey =
   | "omega3"
   | "b12"
   | "nac"
-  | "atomoxetine";
+  | "atomoxetine"
+  | "allkidz_probiotic";
 type EveningMedicationKey =
   | "atomoxetine"
   | "leucovorin"
   | "nac"
   | "magnesium"
-  | "omega3";
+  | "omega3"
+  | "allkidz_probiotic";
 type MedicationKey =
   | "leucovorin"
   | "omega3"
   | "b12"
   | "nac"
   | "atomoxetine"
-  | "magnesium";
+  | "magnesium"
+  | "allkidz_probiotic";
 type DoseTimeOfDay = "morning" | "evening";
-type DoseUnit = "mg" | "ml" | "mcg";
+type DoseUnit = "mg" | "ml" | "mcg" | "gummies";
 
 type DoseSnapshotEntry = {
   taken: boolean;
@@ -52,8 +55,9 @@ type DoseChangeRecord = {
   id: string;
   med_key: MedicationKey;
   time_of_day: DoseTimeOfDay;
-  dose_value: number;
-  dose_unit: DoseUnit;
+  is_active: boolean;
+  dose_value: number | null;
+  dose_unit: DoseUnit | null;
   effective_date: string;
   changed_at: string;
   notes: string | null;
@@ -94,6 +98,7 @@ const initialMorningMeds: Record<MorningMedicationKey, boolean> = {
   b12: false,
   nac: false,
   atomoxetine: false,
+  allkidz_probiotic: false,
 };
 
 const initialEveningMeds: Record<EveningMedicationKey, boolean> = {
@@ -102,6 +107,7 @@ const initialEveningMeds: Record<EveningMedicationKey, boolean> = {
   nac: false,
   magnesium: false,
   omega3: false,
+  allkidz_probiotic: false,
 };
 
 const morningMedicationOptions: { key: MorningMedicationKey; label: string }[] = [
@@ -110,6 +116,7 @@ const morningMedicationOptions: { key: MorningMedicationKey; label: string }[] =
   { key: "b12", label: "B12" },
   { key: "nac", label: "NAC" },
   { key: "atomoxetine", label: "Atomoxetine" },
+  { key: "allkidz_probiotic", label: "AllKiDz Probiotic" },
 ];
 
 const eveningMedicationOptions: { key: EveningMedicationKey; label: string }[] = [
@@ -118,6 +125,7 @@ const eveningMedicationOptions: { key: EveningMedicationKey; label: string }[] =
   { key: "nac", label: "NAC" },
   { key: "magnesium", label: "Magnesium" },
   { key: "omega3", label: "Omega-3" },
+  { key: "allkidz_probiotic", label: "AllKiDz Probiotic" },
 ];
 
 const outburstTimeOptions = Array.from({ length: 48 }, (_, index) => {
@@ -189,6 +197,7 @@ const normalizeMorningMeds = (
   b12: Boolean(value?.b12),
   nac: Boolean(value?.nac),
   atomoxetine: Boolean(value?.atomoxetine),
+  allkidz_probiotic: Boolean(value?.allkidz_probiotic),
 });
 
 const normalizeEveningMeds = (
@@ -199,19 +208,34 @@ const normalizeEveningMeds = (
   nac: Boolean(value?.nac),
   magnesium: Boolean(value?.magnesium),
   omega3: Boolean(value?.omega3),
+  allkidz_probiotic: Boolean(value?.allkidz_probiotic),
 });
 
 const hasAnyMedication = (meds: Record<string, boolean> | null) =>
   !!meds && Object.values(meds).some(Boolean);
-
-const getDoseUnitForMedication = (medKey: MedicationKey): DoseUnit =>
-  medKey === "omega3" ? "ml" : medKey === "b12" ? "mcg" : "mg";
 
 const getActiveDose = (
   activeDoses: ActiveDoseMap,
   timeOfDay: DoseTimeOfDay,
   medKey: MedicationKey,
 ) => activeDoses[`${timeOfDay}:${medKey}`];
+
+const pruneMedsByActiveDose = <T extends MedicationKey>(
+  meds: Record<T, boolean> | null,
+  timeOfDay: DoseTimeOfDay,
+  activeDoses: ActiveDoseMap,
+): Record<T, boolean> | null => {
+  if (!meds) return null;
+
+  const entries = Object.entries(meds).map(([medKey, taken]) => [
+    medKey,
+    getActiveDose(activeDoses, timeOfDay, medKey as MedicationKey)?.dose_value != null
+      ? taken
+      : false,
+  ]);
+
+  return Object.fromEntries(entries) as Record<T, boolean>;
+};
 
 const buildDoseSnapshot = <T extends MedicationKey>(
   meds: Record<T, boolean>,
@@ -225,7 +249,7 @@ const buildDoseSnapshot = <T extends MedicationKey>(
       {
         taken,
         dose_value: activeDose?.dose_value ?? null,
-        dose_unit: activeDose?.dose_unit ?? getDoseUnitForMedication(medKey as MedicationKey),
+        dose_unit: activeDose?.dose_unit ?? null,
         change_id: activeDose?.id ?? null,
       },
     ];
@@ -272,6 +296,20 @@ export default function Home() {
   const [todaysLog, setTodaysLog] = useState<DailyLogRecord | null>(null);
   const [morningMedsTouched, setMorningMedsTouched] = useState<boolean>(false);
   const [eveningMedsTouched, setEveningMedsTouched] = useState<boolean>(false);
+  const filteredMorningMedicationOptions = useMemo(
+    () =>
+      morningMedicationOptions.filter(
+        (med) => getActiveDose(activeDoses, "morning", med.key)?.dose_value != null,
+      ),
+    [activeDoses],
+  );
+  const filteredEveningMedicationOptions = useMemo(
+    () =>
+      eveningMedicationOptions.filter(
+        (med) => getActiveDose(activeDoses, "evening", med.key)?.dose_value != null,
+      ),
+    [activeDoses],
+  );
 
   const applyRecordToForm = (record: DailyLogRecord | null) => {
     if (!record) {
@@ -353,7 +391,7 @@ export default function Home() {
         supabase
           .from("medication_dose_changes")
           .select(
-            "id, med_key, time_of_day, dose_value, dose_unit, effective_date, changed_at, notes",
+            "id, med_key, time_of_day, is_active, dose_value, dose_unit, effective_date, changed_at, notes",
           )
           .lte("effective_date", selectedLogDate)
           .order("effective_date", { ascending: false })
@@ -369,10 +407,13 @@ export default function Home() {
       if (!doseChangesResult.error && doseChangesResult.data) {
         const sortedChanges = doseChangesResult.data as DoseChangeRecord[];
         const active: ActiveDoseMap = {};
+        const seen = new Set<`${DoseTimeOfDay}:${MedicationKey}`>();
 
         sortedChanges.forEach((change) => {
           const key = `${change.time_of_day}:${change.med_key}` as const;
-          if (!active[key]) {
+          if (!seen.has(key)) {
+            seen.add(key);
+            if (!change.is_active) return;
             active[key] = {
               id: change.id,
               dose_value: Number(change.dose_value),
@@ -423,12 +464,22 @@ export default function Home() {
     const existingEveningMood = sanitizeStoredMood(todaysLog?.evening_mood ?? null);
     const resolvedMorningMood = morningMood || existingMorningMood || null;
     const resolvedEveningMood = eveningMood || existingEveningMood || null;
-    const resolvedMorningMeds = morningMedsTouched
+    const baseMorningMeds = morningMedsTouched
       ? morningMeds
       : (todaysLog?.morning_meds ?? null);
-    const resolvedEveningMeds = eveningMedsTouched
+    const baseEveningMeds = eveningMedsTouched
       ? eveningMeds
       : (todaysLog?.evening_meds ?? null);
+    const resolvedMorningMeds = pruneMedsByActiveDose(
+      baseMorningMeds,
+      "morning",
+      activeDoses,
+    );
+    const resolvedEveningMeds = pruneMedsByActiveDose(
+      baseEveningMeds,
+      "evening",
+      activeDoses,
+    );
     const resolvedMorningDoses =
       morningMedsTouched && resolvedMorningMeds
         ? buildDoseSnapshot(resolvedMorningMeds, "morning", activeDoses)
@@ -768,35 +819,41 @@ export default function Home() {
                   Morning Medications
                   {hasAnyMedication(todaysLog?.morning_meds ?? null) && <SavedBadge />}
                 </legend>
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  {morningMedicationOptions.map((med) => (
-                    <label
-                      key={med.key}
-                      className="flex cursor-pointer items-center gap-3 rounded-lg border border-gray-200 bg-white px-3 py-2"
-                    >
-                      <input
-                        type="checkbox"
-                        checked={morningMeds[med.key as MorningMedicationKey]}
-                        onChange={() =>
-                          handleMorningMedicationChange(
-                            med.key as MorningMedicationKey,
-                          )
-                        }
-                        className="h-4 w-4 rounded border-gray-300 text-slate-900 focus:ring-slate-600"
-                      />
-                      <span className="text-sm text-gray-700">
-                        {med.label}
-                        {getActiveDose(activeDoses, "morning", med.key) && (
-                          <span className="text-gray-500">
-                            {" "}
-                            - {getActiveDose(activeDoses, "morning", med.key)?.dose_value}{" "}
-                            {getActiveDose(activeDoses, "morning", med.key)?.dose_unit}
-                          </span>
-                        )}
-                      </span>
-                    </label>
-                  ))}
-                </div>
+                {filteredMorningMedicationOptions.length === 0 ? (
+                  <p className="text-sm text-gray-500">
+                    No active morning medications with a dose.
+                  </p>
+                ) : (
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    {filteredMorningMedicationOptions.map((med) => (
+                      <label
+                        key={med.key}
+                        className="flex cursor-pointer items-center gap-3 rounded-lg border border-gray-200 bg-white px-3 py-2"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={morningMeds[med.key as MorningMedicationKey]}
+                          onChange={() =>
+                            handleMorningMedicationChange(
+                              med.key as MorningMedicationKey,
+                            )
+                          }
+                          className="h-4 w-4 rounded border-gray-300 text-slate-900 focus:ring-slate-600"
+                        />
+                        <span className="text-sm text-gray-700">
+                          {med.label}
+                          {getActiveDose(activeDoses, "morning", med.key) && (
+                            <span className="text-gray-500">
+                              {" "}
+                              - {getActiveDose(activeDoses, "morning", med.key)?.dose_value}{" "}
+                              {getActiveDose(activeDoses, "morning", med.key)?.dose_unit}
+                            </span>
+                          )}
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                )}
               </fieldset>
             </div>
           </section>
@@ -943,35 +1000,41 @@ export default function Home() {
                   Evening Medications
                   {hasAnyMedication(todaysLog?.evening_meds ?? null) && <SavedBadge />}
                 </legend>
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  {eveningMedicationOptions.map((med) => (
-                    <label
-                      key={med.key}
-                      className="flex cursor-pointer items-center gap-3 rounded-lg border border-gray-200 bg-white px-3 py-2"
-                    >
-                      <input
-                        type="checkbox"
-                        checked={eveningMeds[med.key as EveningMedicationKey]}
-                        onChange={() =>
-                          handleEveningMedicationChange(
-                            med.key as EveningMedicationKey,
-                          )
-                        }
-                        className="h-4 w-4 rounded border-gray-300 text-slate-900 focus:ring-slate-600"
-                      />
-                      <span className="text-sm text-gray-700">
-                        {med.label}
-                        {getActiveDose(activeDoses, "evening", med.key) && (
-                          <span className="text-gray-500">
-                            {" "}
-                            - {getActiveDose(activeDoses, "evening", med.key)?.dose_value}{" "}
-                            {getActiveDose(activeDoses, "evening", med.key)?.dose_unit}
-                          </span>
-                        )}
-                      </span>
-                    </label>
-                  ))}
-                </div>
+                {filteredEveningMedicationOptions.length === 0 ? (
+                  <p className="text-sm text-gray-500">
+                    No active evening medications with a dose.
+                  </p>
+                ) : (
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    {filteredEveningMedicationOptions.map((med) => (
+                      <label
+                        key={med.key}
+                        className="flex cursor-pointer items-center gap-3 rounded-lg border border-gray-200 bg-white px-3 py-2"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={eveningMeds[med.key as EveningMedicationKey]}
+                          onChange={() =>
+                            handleEveningMedicationChange(
+                              med.key as EveningMedicationKey,
+                            )
+                          }
+                          className="h-4 w-4 rounded border-gray-300 text-slate-900 focus:ring-slate-600"
+                        />
+                        <span className="text-sm text-gray-700">
+                          {med.label}
+                          {getActiveDose(activeDoses, "evening", med.key) && (
+                            <span className="text-gray-500">
+                              {" "}
+                              - {getActiveDose(activeDoses, "evening", med.key)?.dose_value}{" "}
+                              {getActiveDose(activeDoses, "evening", med.key)?.dose_unit}
+                            </span>
+                          )}
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                )}
               </fieldset>
             </div>
           </section>

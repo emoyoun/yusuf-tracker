@@ -38,8 +38,10 @@ type MedicationKey =
   | "b12"
   | "nac"
   | "atomoxetine"
-  | "magnesium";
+  | "magnesium"
+  | "allkidz_probiotic";
 type MedicationState = Partial<Record<MedicationKey, boolean>>;
+type DoseTimeOfDay = "morning" | "evening";
 
 type DailyLogRow = {
   log_date: string;
@@ -51,10 +53,16 @@ type DailyLogRow = {
   evening_outburst_minutes: number | null;
   evening_outburst_trigger: OutburstTriggerOption | null;
   evening_appetite: AppetiteOption | null;
-  morning_mood: MoodOption | null;
-  evening_mood: MoodOption | null;
+  morning_mood: string | null;
+  evening_mood: string | null;
   morning_meds: MedicationState | null;
   evening_meds: MedicationState | null;
+};
+
+type MedicationDoseChangeRow = {
+  effective_date: string;
+  time_of_day: DoseTimeOfDay;
+  med_key: MedicationKey;
 };
 
 type ChartRow = {
@@ -69,7 +77,13 @@ type ChartRow = {
   eveningAppetiteLabel: AppetiteOption | null;
   eveningAppetiteScore: number | null;
   morningMoodLabel: MoodOption | null;
+  morningMoodScore: number | null;
+  morningMedicationChangeMarker: number | null;
+  morningMedicationChangeMeds: string;
   eveningMoodLabel: MoodOption | null;
+  eveningMoodScore: number | null;
+  eveningMedicationChangeMarker: number | null;
+  eveningMedicationChangeMeds: string;
   morningMeds: MedicationState | null;
   eveningMeds: MedicationState | null;
 };
@@ -84,6 +98,41 @@ const appetiteLabelByScore: Record<number, AppetiteOption> = {
   1: "Low",
   2: "Normal",
   3: "High",
+};
+
+const moodScoreMap: Record<MoodOption, number> = {
+  Calm: 1,
+  Happy: 2,
+  Irritable: 3,
+  Energetic: 4,
+};
+
+const moodLabelByScore: Record<number, MoodOption> = {
+  1: "Calm",
+  2: "Happy",
+  3: "Irritable",
+  4: "Energetic",
+};
+
+const normalizeMood = (value: string | null | undefined): MoodOption | null => {
+  if (!value) return null;
+
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  if (trimmed === "Outburst") return "Irritable";
+
+  switch (trimmed.toLowerCase()) {
+    case "calm":
+      return "Calm";
+    case "happy":
+      return "Happy";
+    case "irritable":
+      return "Irritable";
+    case "energetic":
+      return "Energetic";
+    default:
+      return null;
+  }
 };
 
 const moodColorMap: Record<MoodOption, string> = {
@@ -145,7 +194,11 @@ const medicationRows: { key: MedicationKey; label: string }[] = [
   { key: "leucovorin", label: "Leucovorin" },
   { key: "omega3", label: "Omega-3" },
   { key: "magnesium", label: "Magnesium" },
+  { key: "allkidz_probiotic", label: "AllKiDz Probiotic" },
 ];
+const medicationLabelByKey: Record<MedicationKey, string> = Object.fromEntries(
+  medicationRows.map((row) => [row.key, row.label]),
+) as Record<MedicationKey, string>;
 
 export default function HistoryPage() {
   const [rows, setRows] = useState<ChartRow[]>([]);
@@ -162,41 +215,92 @@ export default function HistoryPage() {
         return;
       }
 
-      const { data, error: queryError } = await supabase
-        .from("daily_logs")
-        .select(
-          "log_date, sleep_quality, morning_outburst_time, morning_outburst_minutes, morning_outburst_trigger, evening_outburst_time, evening_outburst_minutes, evening_outburst_trigger, evening_appetite, morning_mood, evening_mood, morning_meds, evening_meds",
-        )
-        .order("log_date", { ascending: true });
+      const [dailyLogsResult, medicationChangesResult] = await Promise.all([
+        supabase
+          .from("daily_logs")
+          .select(
+            "log_date, sleep_quality, morning_outburst_time, morning_outburst_minutes, morning_outburst_trigger, evening_outburst_time, evening_outburst_minutes, evening_outburst_trigger, evening_appetite, morning_mood, evening_mood, morning_meds, evening_meds",
+          )
+          .order("log_date", { ascending: true }),
+        supabase
+          .from("medication_dose_changes")
+          .select("effective_date, time_of_day, med_key"),
+      ]);
 
-      if (queryError) {
-        setError(queryError.message);
+      if (dailyLogsResult.error) {
+        setError(dailyLogsResult.error.message);
         setLoading(false);
         return;
       }
 
-      const mappedRows: ChartRow[] = (data as DailyLogRow[]).map((log) => {
-        const appetiteScore = log.evening_appetite
-          ? appetiteScoreMap[log.evening_appetite]
-          : null;
+      if (medicationChangesResult.error) {
+        setError(medicationChangesResult.error.message);
+        setLoading(false);
+        return;
+      }
 
-        return {
-          date: log.log_date,
-          sleepQuality: log.sleep_quality,
-          morningOutburstTime: log.morning_outburst_time,
-          morningOutburstMinutes: log.morning_outburst_minutes,
-          morningOutburstTrigger: log.morning_outburst_trigger,
-          eveningOutburstTime: log.evening_outburst_time,
-          eveningOutburstMinutes: log.evening_outburst_minutes,
-          eveningOutburstTrigger: log.evening_outburst_trigger,
-          eveningAppetiteLabel: log.evening_appetite,
-          eveningAppetiteScore: appetiteScore,
-          morningMoodLabel: log.morning_mood,
-          eveningMoodLabel: log.evening_mood,
-          morningMeds: log.morning_meds,
-          eveningMeds: log.evening_meds,
-        };
+      const medicationChangeNames = new Map<`${string}:${DoseTimeOfDay}`, Set<string>>();
+
+      (medicationChangesResult.data as MedicationDoseChangeRow[]).forEach((change) => {
+        const key = `${change.effective_date}:${change.time_of_day}` as const;
+        const labels = medicationChangeNames.get(key) ?? new Set<string>();
+        labels.add(medicationLabelByKey[change.med_key] ?? change.med_key);
+        medicationChangeNames.set(key, labels);
       });
+
+      const logsByDate = new Map(
+        (dailyLogsResult.data as DailyLogRow[]).map((log) => [log.log_date, log]),
+      );
+      const allDates = new Set<string>([
+        ...(dailyLogsResult.data as DailyLogRow[]).map((log) => log.log_date),
+        ...(medicationChangesResult.data as MedicationDoseChangeRow[]).map(
+          (change) => change.effective_date,
+        ),
+      ]);
+
+      const mappedRows: ChartRow[] = Array.from(allDates)
+        .sort((a, b) => a.localeCompare(b))
+        .map((date) => {
+          const log = logsByDate.get(date);
+          const appetiteScore = log?.evening_appetite
+            ? appetiteScoreMap[log.evening_appetite]
+            : null;
+          const morningMood = normalizeMood(log?.morning_mood);
+          const eveningMood = normalizeMood(log?.evening_mood);
+          const morningMedicationChangeMeds = Array.from(
+            medicationChangeNames.get(`${date}:morning`) ?? [],
+          )
+            .sort()
+            .join(", ");
+          const eveningMedicationChangeMeds = Array.from(
+            medicationChangeNames.get(`${date}:evening`) ?? [],
+          )
+            .sort()
+            .join(", ");
+
+          return {
+            date,
+            sleepQuality: log?.sleep_quality ?? null,
+            morningOutburstTime: log?.morning_outburst_time ?? null,
+            morningOutburstMinutes: log?.morning_outburst_minutes ?? null,
+            morningOutburstTrigger: log?.morning_outburst_trigger ?? null,
+            eveningOutburstTime: log?.evening_outburst_time ?? null,
+            eveningOutburstMinutes: log?.evening_outburst_minutes ?? null,
+            eveningOutburstTrigger: log?.evening_outburst_trigger ?? null,
+            eveningAppetiteLabel: log?.evening_appetite ?? null,
+            eveningAppetiteScore: appetiteScore,
+            morningMoodLabel: morningMood,
+            morningMoodScore: morningMood ? moodScoreMap[morningMood] : null,
+            morningMedicationChangeMarker: morningMedicationChangeMeds ? 4.35 : null,
+            morningMedicationChangeMeds,
+            eveningMoodLabel: eveningMood,
+            eveningMoodScore: eveningMood ? moodScoreMap[eveningMood] : null,
+            eveningMedicationChangeMarker: eveningMedicationChangeMeds ? 4.35 : null,
+            eveningMedicationChangeMeds,
+            morningMeds: log?.morning_meds ?? null,
+            eveningMeds: log?.evening_meds ?? null,
+          };
+        });
 
       setRows(mappedRows);
       setLoading(false);
@@ -567,6 +671,186 @@ export default function HistoryPage() {
                       strokeWidth={2}
                       dot={{ r: 3 }}
                       connectNulls
+                    />
+                  </ComposedChart>
+                </ResponsiveContainer>
+              </div>
+            </section>
+
+            <section className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-gray-200 sm:p-6">
+              <h2 className="mb-4 text-lg font-semibold text-gray-900">
+                Morning Mood, Outburst Duration, and Medication Changes
+              </h2>
+              <p className="mb-2 text-sm text-gray-600">
+                Mood is a line, outburst duration is a bar, and medication changes are
+                shown as teal dots.
+              </p>
+              <div className="h-64 w-full sm:h-80">
+                <ResponsiveContainer width="100%" height="100%">
+                  <ComposedChart
+                    data={rows}
+                    margin={{ top: 8, right: 8, left: -18, bottom: 8 }}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                    <XAxis
+                      dataKey="date"
+                      tickFormatter={formatDateShort}
+                      tick={{ fontSize: 12 }}
+                      stroke="#6b7280"
+                    />
+                    <YAxis
+                      yAxisId="mood"
+                      domain={[1, 4.5]}
+                      ticks={[1, 2, 3, 4]}
+                      tickFormatter={(value) => moodLabelByScore[value] ?? ""}
+                      tick={{ fontSize: 12 }}
+                      stroke="#6b7280"
+                    />
+                    <YAxis
+                      yAxisId="outburst"
+                      orientation="right"
+                      allowDecimals={false}
+                      tick={{ fontSize: 12 }}
+                      stroke="#6b7280"
+                    />
+                    <Tooltip
+                      content={({ active, payload, label }) => {
+                        if (!active || !payload?.length || typeof label !== "string") return null;
+                        const row = payload[0].payload as ChartRow;
+                        return (
+                          <div className="rounded-md border border-gray-200 bg-white px-3 py-2 text-xs shadow">
+                            <p className="font-medium text-gray-800">
+                              {new Intl.DateTimeFormat("en-CA", {
+                                dateStyle: "medium",
+                                timeZone: "America/Toronto",
+                              }).format(new Date(`${label}T00:00:00`))}
+                            </p>
+                            <p className="mt-1 text-gray-700">
+                              Mood: {row.morningMoodLabel ?? "Not set"}
+                            </p>
+                            <p className="text-gray-700">
+                              Outburst duration: {row.morningOutburstMinutes ?? 0} min
+                            </p>
+                            <p className="text-gray-700">
+                              Medication changes: {row.morningMedicationChangeMeds || "None"}
+                            </p>
+                          </div>
+                        );
+                      }}
+                    />
+                    <Legend />
+                    <Bar
+                      yAxisId="outburst"
+                      dataKey="morningOutburstMinutes"
+                      name="Outburst Duration (min)"
+                      fill="#fca5a5"
+                      radius={[6, 6, 0, 0]}
+                    />
+                    <Line
+                      yAxisId="mood"
+                      type="monotone"
+                      dataKey="morningMoodScore"
+                      name="Mood"
+                      stroke="#60a5fa"
+                      strokeWidth={2}
+                      dot={{ r: 3 }}
+                      connectNulls
+                    />
+                    <Scatter
+                      yAxisId="mood"
+                      dataKey="morningMedicationChangeMarker"
+                      name="Medication Change"
+                      fill="#14b8a6"
+                    />
+                  </ComposedChart>
+                </ResponsiveContainer>
+              </div>
+            </section>
+
+            <section className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-gray-200 sm:p-6">
+              <h2 className="mb-4 text-lg font-semibold text-gray-900">
+                Evening Mood, Outburst Duration, and Medication Changes
+              </h2>
+              <p className="mb-2 text-sm text-gray-600">
+                Mood is a line, outburst duration is a bar, and medication changes are
+                shown as teal dots.
+              </p>
+              <div className="h-64 w-full sm:h-80">
+                <ResponsiveContainer width="100%" height="100%">
+                  <ComposedChart
+                    data={rows}
+                    margin={{ top: 8, right: 8, left: -18, bottom: 8 }}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                    <XAxis
+                      dataKey="date"
+                      tickFormatter={formatDateShort}
+                      tick={{ fontSize: 12 }}
+                      stroke="#6b7280"
+                    />
+                    <YAxis
+                      yAxisId="mood"
+                      domain={[1, 4.5]}
+                      ticks={[1, 2, 3, 4]}
+                      tickFormatter={(value) => moodLabelByScore[value] ?? ""}
+                      tick={{ fontSize: 12 }}
+                      stroke="#6b7280"
+                    />
+                    <YAxis
+                      yAxisId="outburst"
+                      orientation="right"
+                      allowDecimals={false}
+                      tick={{ fontSize: 12 }}
+                      stroke="#6b7280"
+                    />
+                    <Tooltip
+                      content={({ active, payload, label }) => {
+                        if (!active || !payload?.length || typeof label !== "string") return null;
+                        const row = payload[0].payload as ChartRow;
+                        return (
+                          <div className="rounded-md border border-gray-200 bg-white px-3 py-2 text-xs shadow">
+                            <p className="font-medium text-gray-800">
+                              {new Intl.DateTimeFormat("en-CA", {
+                                dateStyle: "medium",
+                                timeZone: "America/Toronto",
+                              }).format(new Date(`${label}T00:00:00`))}
+                            </p>
+                            <p className="mt-1 text-gray-700">
+                              Mood: {row.eveningMoodLabel ?? "Not set"}
+                            </p>
+                            <p className="text-gray-700">
+                              Outburst duration: {row.eveningOutburstMinutes ?? 0} min
+                            </p>
+                            <p className="text-gray-700">
+                              Medication changes: {row.eveningMedicationChangeMeds || "None"}
+                            </p>
+                          </div>
+                        );
+                      }}
+                    />
+                    <Legend />
+                    <Bar
+                      yAxisId="outburst"
+                      dataKey="eveningOutburstMinutes"
+                      name="Outburst Duration (min)"
+                      fill="#fca5a5"
+                      radius={[6, 6, 0, 0]}
+                    />
+                    <Line
+                      yAxisId="mood"
+                      type="monotone"
+                      dataKey="eveningMoodScore"
+                      name="Mood"
+                      stroke="#34d399"
+                      strokeWidth={2}
+                      dot={{ r: 3 }}
+                      connectNulls
+                    />
+                    <Scatter
+                      yAxisId="mood"
+                      dataKey="eveningMedicationChangeMarker"
+                      name="Medication Change"
+                      fill="#14b8a6"
                     />
                   </ComposedChart>
                 </ResponsiveContainer>
