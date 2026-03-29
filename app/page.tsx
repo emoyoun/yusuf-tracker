@@ -580,6 +580,12 @@ export default function Home() {
           </div>
           <div className="flex flex-wrap gap-2">
             <Link
+              href="/checklists"
+              className="inline-flex items-center justify-center rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50"
+            >
+              Checklists
+            </Link>
+            <Link
               href="/doses"
               className="inline-flex items-center justify-center rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50"
             >
