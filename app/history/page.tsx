@@ -31,7 +31,7 @@ type OutburstTriggerOption =
   | "Fatigue"
   | "Sensory overload"
   | "Communication"
-  | "Medication change (timing/dose/new)";
+  | "Atomoxetine";
 type MedicationKey =
   | "leucovorin"
   | "omega3"
@@ -63,6 +63,24 @@ type MedicationDoseChangeRow = {
   effective_date: string;
   time_of_day: DoseTimeOfDay;
   med_key: MedicationKey;
+};
+
+type DailyTrainingItemRow = {
+  id: string;
+  label: string;
+};
+
+type DailyTrainingLogRow = {
+  log_date: string;
+  training_item_id: string;
+  is_done: boolean;
+};
+
+type TrainingHeatmapDay = {
+  date: string;
+  completedCount: number;
+  totalCount: number;
+  completedLabels: string[];
 };
 
 type ChartRow = {
@@ -150,7 +168,7 @@ const triggerColorMap: Record<OutburstTriggerOption, string> = {
   Fatigue: "#64748b",
   "Sensory overload": "#ec4899",
   Communication: "#f59e0b",
-  "Medication change (timing/dose/new)": "#14b8a6",
+  Atomoxetine: "#14b8a6",
 };
 
 const formatDateShort = (value: string) => {
@@ -182,6 +200,15 @@ const formatMinutesToTime = (value: number) => {
   return `${hours.toString().padStart(2, "0")}:${minutes.toString().padStart(2, "0")}`;
 };
 
+const getHeatmapColor = (completedCount: number, totalCount: number) => {
+  if (totalCount <= 0) return "#f3f4f6";
+  const ratio = completedCount / totalCount;
+  if (ratio === 0) return "#f3f4f6";
+  if (ratio < 0.34) return "#bbf7d0";
+  if (ratio < 0.67) return "#4ade80";
+  return "#15803d";
+};
+
 const getTorontoDateString = () =>
   new Intl.DateTimeFormat("en-CA", {
     timeZone: "America/Toronto",
@@ -202,6 +229,8 @@ const medicationLabelByKey: Record<MedicationKey, string> = Object.fromEntries(
 
 export default function HistoryPage() {
   const [rows, setRows] = useState<ChartRow[]>([]);
+  const [trainingItems, setTrainingItems] = useState<DailyTrainingItemRow[]>([]);
+  const [trainingLogs, setTrainingLogs] = useState<DailyTrainingLogRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -215,7 +244,8 @@ export default function HistoryPage() {
         return;
       }
 
-      const [dailyLogsResult, medicationChangesResult] = await Promise.all([
+      const [dailyLogsResult, medicationChangesResult, trainingItemsResult, trainingLogsResult] =
+        await Promise.all([
         supabase
           .from("daily_logs")
           .select(
@@ -225,6 +255,15 @@ export default function HistoryPage() {
         supabase
           .from("medication_dose_changes")
           .select("effective_date, time_of_day, med_key"),
+        supabase
+          .from("daily_training_items")
+          .select("id, label")
+          .order("sort_order", { ascending: true })
+          .order("created_at", { ascending: true }),
+        supabase
+          .from("daily_training_item_logs")
+          .select("log_date, training_item_id, is_done")
+          .order("log_date", { ascending: true }),
       ]);
 
       if (dailyLogsResult.error) {
@@ -235,6 +274,18 @@ export default function HistoryPage() {
 
       if (medicationChangesResult.error) {
         setError(medicationChangesResult.error.message);
+        setLoading(false);
+        return;
+      }
+
+      if (trainingItemsResult.error) {
+        setError(trainingItemsResult.error.message);
+        setLoading(false);
+        return;
+      }
+
+      if (trainingLogsResult.error) {
+        setError(trainingLogsResult.error.message);
         setLoading(false);
         return;
       }
@@ -303,6 +354,8 @@ export default function HistoryPage() {
         });
 
       setRows(mappedRows);
+      setTrainingItems((trainingItemsResult.data as DailyTrainingItemRow[]) ?? []);
+      setTrainingLogs((trainingLogsResult.data as DailyTrainingLogRow[]) ?? []);
       setLoading(false);
     };
 
@@ -459,7 +512,7 @@ export default function HistoryPage() {
       Fatigue: 0,
       "Sensory overload": 0,
       Communication: 0,
-      "Medication change (timing/dose/new)": 0,
+      Atomoxetine: 0,
     };
 
     rows.forEach((row) => {
@@ -498,6 +551,52 @@ export default function HistoryPage() {
     row: ChartRow | undefined,
     medication: MedicationKey,
   ) => Boolean(row?.eveningMeds?.[medication]);
+
+  const trainingHeatmapDays = useMemo(() => {
+    const today = new Date(`${getTorontoDateString()}T00:00:00`);
+    const startDate = new Date(today);
+    startDate.setDate(today.getDate() - 83);
+
+    const itemLabelById = new Map(trainingItems.map((item) => [item.id, item.label]));
+    const completedByDate = new Map<string, Set<string>>();
+
+    trainingLogs.forEach((log) => {
+      if (!log.is_done) return;
+      const set = completedByDate.get(log.log_date) ?? new Set<string>();
+      set.add(log.training_item_id);
+      completedByDate.set(log.log_date, set);
+    });
+
+    return Array.from({ length: 84 }, (_, index) => {
+      const currentDate = new Date(startDate);
+      currentDate.setDate(startDate.getDate() + index);
+      const year = currentDate.getFullYear();
+      const month = `${currentDate.getMonth() + 1}`.padStart(2, "0");
+      const day = `${currentDate.getDate()}`.padStart(2, "0");
+      const date = `${year}-${month}-${day}`;
+      const completedIds = completedByDate.get(date) ?? new Set<string>();
+      const completedLabels = Array.from(completedIds)
+        .map((id) => itemLabelById.get(id))
+        .filter((label): label is string => Boolean(label));
+
+      return {
+        date,
+        completedCount: completedIds.size,
+        totalCount: trainingItems.length,
+        completedLabels,
+      } satisfies TrainingHeatmapDay;
+    });
+  }, [trainingItems, trainingLogs]);
+
+  const trainingHeatmapCells = useMemo(() => {
+    if (trainingHeatmapDays.length === 0) return [];
+    const firstDay = new Date(`${trainingHeatmapDays[0].date}T00:00:00`);
+    const leadingEmpty = firstDay.getDay();
+    return [
+      ...Array.from({ length: leadingEmpty }, () => null as TrainingHeatmapDay | null),
+      ...trainingHeatmapDays,
+    ];
+  }, [trainingHeatmapDays]);
 
   return (
     <main className="min-h-screen bg-gray-100 p-4 sm:p-6">
@@ -538,6 +637,62 @@ export default function HistoryPage() {
             <p className="text-sm text-gray-600">
               No daily logs yet. Submit a few entries to see trends.
             </p>
+          </section>
+        )}
+
+        {!loading && !error && (
+          <section className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-gray-200 sm:p-6">
+            <h2 className="mb-2 text-lg font-semibold text-gray-900">
+              Daily Training Activity
+            </h2>
+            <p className="mb-3 text-sm text-gray-600">
+              Calendar heatmap for the last 12 weeks. Darker green means more
+              training items completed that day.
+            </p>
+            {trainingItems.length === 0 ? (
+              <p className="text-sm text-gray-600">
+                No daily training items found yet.
+              </p>
+            ) : (
+              <>
+                <div className="overflow-x-auto">
+                  <div className="grid w-max grid-flow-col grid-rows-7 gap-1 rounded-lg border border-gray-200 bg-white p-2">
+                    {trainingHeatmapCells.map((day, index) =>
+                      day ? (
+                        <div
+                          key={day.date}
+                          className="h-4 w-4 rounded-sm"
+                          style={{
+                            backgroundColor: getHeatmapColor(
+                              day.completedCount,
+                              day.totalCount,
+                            ),
+                          }}
+                          title={`${formatDateShort(day.date)}: ${day.completedCount}/${day.totalCount} completed${
+                            day.completedLabels.length
+                              ? `\n${day.completedLabels.join(", ")}`
+                              : ""
+                          }`}
+                        />
+                      ) : (
+                        <div
+                          key={`empty-${index}`}
+                          className="h-4 w-4 rounded-sm bg-transparent"
+                        />
+                      ),
+                    )}
+                  </div>
+                </div>
+                <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-gray-600">
+                  <span>Less</span>
+                  <span className="h-3 w-3 rounded-sm bg-gray-100" />
+                  <span className="h-3 w-3 rounded-sm bg-green-200" />
+                  <span className="h-3 w-3 rounded-sm bg-green-400" />
+                  <span className="h-3 w-3 rounded-sm bg-green-700" />
+                  <span>More</span>
+                </div>
+              </>
+            )}
           </section>
         )}
 

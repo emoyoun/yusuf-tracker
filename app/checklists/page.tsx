@@ -19,6 +19,8 @@ type ChecklistItem = {
   created_at: string;
 };
 
+const TRAINING_SLUG = "daily-training-with-yusuf";
+
 export default function ChecklistsPage() {
   const [checklists, setChecklists] = useState<Checklist[]>([]);
   const [selectedChecklistId, setSelectedChecklistId] = useState<string>("");
@@ -27,6 +29,7 @@ export default function ChecklistsPage() {
   const [isLoadingChecklists, setIsLoadingChecklists] = useState<boolean>(true);
   const [isLoadingItems, setIsLoadingItems] = useState<boolean>(false);
   const [isSavingItem, setIsSavingItem] = useState<boolean>(false);
+  const [deletingItemId, setDeletingItemId] = useState<string | null>(null);
   const [checkedItems, setCheckedItems] = useState<Record<string, boolean>>({});
   const [error, setError] = useState<string | null>(null);
 
@@ -49,6 +52,7 @@ export default function ChecklistsPage() {
       const { data, error: queryError } = await supabase
         .from("checklists")
         .select("id, name, slug")
+        .neq("slug", TRAINING_SLUG)
         .order("name", { ascending: true });
 
       if (queryError) {
@@ -148,6 +152,27 @@ export default function ChecklistsPage() {
     });
   };
 
+  const handleDeleteItem = async (itemId: string) => {
+    if (!supabase) return;
+
+    setDeletingItemId(itemId);
+    const { error: deleteError } = await supabase.from("checklist_items").delete().eq("id", itemId);
+
+    if (deleteError) {
+      alert(`Failed to delete item: ${deleteError.message}`);
+      setDeletingItemId(null);
+      return;
+    }
+
+    setItems((prev) => prev.filter((item) => item.id !== itemId));
+    setCheckedItems((prev) => {
+      const next = { ...prev };
+      delete next[itemId];
+      return next;
+    });
+    setDeletingItemId(null);
+  };
+
   return (
     <main className="min-h-screen bg-gray-100 p-4 sm:p-6">
       <div className="mx-auto w-full max-w-4xl space-y-4">
@@ -167,12 +192,6 @@ export default function ChecklistsPage() {
                 className="rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50"
               >
                 Back to Daily Log
-              </Link>
-              <Link
-                href="/history"
-                className="rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50"
-              >
-                View History
               </Link>
             </div>
           </div>
@@ -257,21 +276,31 @@ export default function ChecklistsPage() {
                     key={item.id}
                     className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-800"
                   >
-                    <label className="flex cursor-pointer items-center gap-3">
-                      <input
-                        type="checkbox"
-                        checked={Boolean(checkedItems[item.id])}
-                        onChange={() => toggleItemChecked(item.id)}
-                        className="h-4 w-4 rounded border-gray-300 text-slate-900 focus:ring-slate-600"
-                      />
-                      <span
-                        className={
-                          checkedItems[item.id] ? "text-gray-500 line-through" : "text-gray-800"
-                        }
+                    <div className="flex items-center justify-between gap-3">
+                      <label className="flex cursor-pointer items-center gap-3">
+                        <input
+                          type="checkbox"
+                          checked={Boolean(checkedItems[item.id])}
+                          onChange={() => toggleItemChecked(item.id)}
+                          className="h-4 w-4 rounded border-gray-300 text-slate-900 focus:ring-slate-600"
+                        />
+                        <span
+                          className={
+                            checkedItems[item.id] ? "text-gray-500 line-through" : "text-gray-800"
+                          }
+                        >
+                          {item.label}
+                        </span>
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => void handleDeleteItem(item.id)}
+                        disabled={deletingItemId === item.id}
+                        className="rounded-lg border border-red-300 px-2 py-1 text-xs font-medium text-red-700 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
                       >
-                        {item.label}
-                      </span>
-                    </label>
+                        {deletingItemId === item.id ? "Deleting..." : "Delete"}
+                      </button>
+                    </div>
                   </li>
                 ))}
               </ul>

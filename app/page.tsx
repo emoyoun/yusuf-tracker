@@ -16,7 +16,7 @@ type OutburstTriggerOption =
   | "Fatigue"
   | "Sensory overload"
   | "Communication"
-  | "Medication change (timing/dose/new)";
+  | "Atomoxetine";
 type MorningMedicationKey =
   | "leucovorin"
   | "omega3"
@@ -142,7 +142,7 @@ const outburstTriggerOptions: Exclude<OutburstTriggerOption, "">[] = [
   "Fatigue",
   "Sensory overload",
   "Communication",
-  "Medication change (timing/dose/new)",
+  "Atomoxetine",
 ];
 
 const getTorontoOffset = () => {
@@ -579,6 +579,12 @@ export default function Home() {
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
+            <Link
+              href="/training"
+              className="inline-flex items-center justify-center rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50"
+            >
+              Daily Training
+            </Link>
             <Link
               href="/checklists"
               className="inline-flex items-center justify-center rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50"
