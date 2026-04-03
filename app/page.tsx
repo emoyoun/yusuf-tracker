@@ -19,7 +19,8 @@ type OutburstTriggerOption =
   | "Atomoxetine";
 type MorningMedicationKey =
   | "leucovorin"
-  | "omega3"
+  | "speakd_omega3"
+  | "nutrasea_omega3"
   | "b12"
   | "nac"
   | "atomoxetine"
@@ -29,11 +30,13 @@ type EveningMedicationKey =
   | "leucovorin"
   | "nac"
   | "magnesium"
-  | "omega3"
+  | "speakd_omega3"
+  | "nutrasea_omega3"
   | "allkidz_probiotic";
 type MedicationKey =
   | "leucovorin"
-  | "omega3"
+  | "speakd_omega3"
+  | "nutrasea_omega3"
   | "b12"
   | "nac"
   | "atomoxetine"
@@ -94,7 +97,8 @@ type DailyLogRecord = {
 
 const initialMorningMeds: Record<MorningMedicationKey, boolean> = {
   leucovorin: false,
-  omega3: false,
+  speakd_omega3: false,
+  nutrasea_omega3: false,
   b12: false,
   nac: false,
   atomoxetine: false,
@@ -106,13 +110,15 @@ const initialEveningMeds: Record<EveningMedicationKey, boolean> = {
   leucovorin: false,
   nac: false,
   magnesium: false,
-  omega3: false,
+  speakd_omega3: false,
+  nutrasea_omega3: false,
   allkidz_probiotic: false,
 };
 
 const morningMedicationOptions: { key: MorningMedicationKey; label: string }[] = [
   { key: "leucovorin", label: "Leucovorin" },
-  { key: "omega3", label: "Omega-3" },
+  { key: "speakd_omega3", label: "Speak+D Omega-3" },
+  { key: "nutrasea_omega3", label: "NutraSea Omega-3" },
   { key: "b12", label: "B12" },
   { key: "nac", label: "NAC" },
   { key: "atomoxetine", label: "Atomoxetine" },
@@ -124,7 +130,8 @@ const eveningMedicationOptions: { key: EveningMedicationKey; label: string }[] =
   { key: "leucovorin", label: "Leucovorin" },
   { key: "nac", label: "NAC" },
   { key: "magnesium", label: "Magnesium" },
-  { key: "omega3", label: "Omega-3" },
+  { key: "speakd_omega3", label: "Speak+D Omega-3" },
+  { key: "nutrasea_omega3", label: "NutraSea Omega-3" },
   { key: "allkidz_probiotic", label: "AllKiDz Probiotic" },
 ];
 
@@ -191,25 +198,35 @@ const sanitizeStoredMood = (value: StoredMoodOption | null): Exclude<MoodOption,
 
 const normalizeMorningMeds = (
   value: DailyLogRecord["morning_meds"],
-): Record<MorningMedicationKey, boolean> => ({
+): Record<MorningMedicationKey, boolean> => {
+  const legacyMeds = value as Record<string, boolean> | null;
+
+  return {
   leucovorin: Boolean(value?.leucovorin),
-  omega3: Boolean(value?.omega3),
+  speakd_omega3: Boolean(value?.speakd_omega3 ?? legacyMeds?.omega3),
+  nutrasea_omega3: Boolean(value?.nutrasea_omega3),
   b12: Boolean(value?.b12),
   nac: Boolean(value?.nac),
   atomoxetine: Boolean(value?.atomoxetine),
   allkidz_probiotic: Boolean(value?.allkidz_probiotic),
-});
+  };
+};
 
 const normalizeEveningMeds = (
   value: DailyLogRecord["evening_meds"],
-): Record<EveningMedicationKey, boolean> => ({
+): Record<EveningMedicationKey, boolean> => {
+  const legacyMeds = value as Record<string, boolean> | null;
+
+  return {
   atomoxetine: Boolean(value?.atomoxetine),
   leucovorin: Boolean(value?.leucovorin),
   nac: Boolean(value?.nac),
   magnesium: Boolean(value?.magnesium),
-  omega3: Boolean(value?.omega3),
+  speakd_omega3: Boolean(value?.speakd_omega3 ?? legacyMeds?.omega3),
+  nutrasea_omega3: Boolean(value?.nutrasea_omega3),
   allkidz_probiotic: Boolean(value?.allkidz_probiotic),
-});
+  };
+};
 
 const hasAnyMedication = (meds: Record<string, boolean> | null) =>
   !!meds && Object.values(meds).some(Boolean);

@@ -6,7 +6,8 @@ import { supabase } from "@/lib/supabase";
 
 type MedicationKey =
   | "leucovorin"
-  | "omega3"
+  | "speakd_omega3"
+  | "nutrasea_omega3"
   | "b12"
   | "nac"
   | "atomoxetine"
@@ -29,7 +30,8 @@ type DoseChangeRecord = {
 
 const medicationOptions: { key: MedicationKey; label: string }[] = [
   { key: "leucovorin", label: "Leucovorin" },
-  { key: "omega3", label: "Omega-3" },
+  { key: "speakd_omega3", label: "Speak+D Omega-3" },
+  { key: "nutrasea_omega3", label: "NutraSea Omega-3" },
   { key: "b12", label: "B12" },
   { key: "nac", label: "NAC" },
   { key: "atomoxetine", label: "Atomoxetine" },
@@ -43,7 +45,7 @@ const getTorontoDate = () =>
   }).format(new Date());
 
 const getDoseUnitForMedication = (medKey: MedicationKey): DoseUnit =>
-  medKey === "omega3"
+  medKey === "speakd_omega3" || medKey === "nutrasea_omega3"
     ? "ml"
     : medKey === "b12"
       ? "mcg"
@@ -213,7 +215,7 @@ export default function DosesPage() {
                 placeholder="e.g. 10"
               />
               <p className="mt-1 text-xs text-gray-500">
-                Omega-3 uses ml, B12 uses mcg, AllKiDz Probiotic uses gummies,
+                Speak+D Omega-3 and NutraSea Omega-3 use ml, B12 uses mcg, AllKiDz Probiotic uses gummies,
                 all other medications use mg.
               </p>
             </div>

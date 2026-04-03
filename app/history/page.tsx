@@ -34,7 +34,8 @@ type OutburstTriggerOption =
   | "Atomoxetine";
 type MedicationKey =
   | "leucovorin"
-  | "omega3"
+  | "speakd_omega3"
+  | "nutrasea_omega3"
   | "b12"
   | "nac"
   | "atomoxetine"
@@ -219,7 +220,8 @@ const medicationRows: { key: MedicationKey; label: string }[] = [
   { key: "nac", label: "NAC" },
   { key: "atomoxetine", label: "Atomoxetine" },
   { key: "leucovorin", label: "Leucovorin" },
-  { key: "omega3", label: "Omega-3" },
+  { key: "speakd_omega3", label: "Speak+D Omega-3" },
+  { key: "nutrasea_omega3", label: "NutraSea Omega-3" },
   { key: "magnesium", label: "Magnesium" },
   { key: "allkidz_probiotic", label: "AllKiDz Probiotic" },
 ];
@@ -545,12 +547,22 @@ export default function HistoryPage() {
   const wasMorningMedicationTaken = (
     row: ChartRow | undefined,
     medication: MedicationKey,
-  ) => Boolean(row?.morningMeds?.[medication]);
+ ) => {
+  const legacyMeds = row?.morningMeds as Record<string, boolean> | undefined;
+  return medication === "speakd_omega3"
+    ? Boolean(row?.morningMeds?.speakd_omega3 ?? legacyMeds?.omega3)
+    : Boolean(row?.morningMeds?.[medication]);
+};
 
   const wasEveningMedicationTaken = (
     row: ChartRow | undefined,
     medication: MedicationKey,
-  ) => Boolean(row?.eveningMeds?.[medication]);
+ ) => {
+  const legacyMeds = row?.eveningMeds as Record<string, boolean> | undefined;
+  return medication === "speakd_omega3"
+    ? Boolean(row?.eveningMeds?.speakd_omega3 ?? legacyMeds?.omega3)
+    : Boolean(row?.eveningMeds?.[medication]);
+};
 
   const trainingHeatmapDays = useMemo(() => {
     const today = new Date(`${getTorontoDateString()}T00:00:00`);
