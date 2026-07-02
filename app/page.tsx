@@ -24,9 +24,11 @@ type MorningMedicationKey =
   | "b12"
   | "nac"
   | "atomoxetine"
+  | "intuniv"
   | "allkidz_probiotic";
 type EveningMedicationKey =
   | "atomoxetine"
+  | "intuniv"
   | "leucovorin"
   | "nac"
   | "magnesium"
@@ -40,6 +42,7 @@ type MedicationKey =
   | "b12"
   | "nac"
   | "atomoxetine"
+  | "intuniv"
   | "magnesium"
   | "allkidz_probiotic";
 type DoseTimeOfDay = "morning" | "evening";
@@ -102,11 +105,13 @@ const initialMorningMeds: Record<MorningMedicationKey, boolean> = {
   b12: false,
   nac: false,
   atomoxetine: false,
+  intuniv: false,
   allkidz_probiotic: false,
 };
 
 const initialEveningMeds: Record<EveningMedicationKey, boolean> = {
   atomoxetine: false,
+  intuniv: false,
   leucovorin: false,
   nac: false,
   magnesium: false,
@@ -122,11 +127,13 @@ const morningMedicationOptions: { key: MorningMedicationKey; label: string }[] =
   { key: "b12", label: "B12" },
   { key: "nac", label: "NAC" },
   { key: "atomoxetine", label: "Atomoxetine" },
+  { key: "intuniv", label: "Intuniv" },
   { key: "allkidz_probiotic", label: "AllKiDz Probiotic" },
 ];
 
 const eveningMedicationOptions: { key: EveningMedicationKey; label: string }[] = [
   { key: "atomoxetine", label: "Atomoxetine" },
+  { key: "intuniv", label: "Intuniv" },
   { key: "leucovorin", label: "Leucovorin" },
   { key: "nac", label: "NAC" },
   { key: "magnesium", label: "Magnesium" },
@@ -208,6 +215,7 @@ const normalizeMorningMeds = (
   b12: Boolean(value?.b12),
   nac: Boolean(value?.nac),
   atomoxetine: Boolean(value?.atomoxetine),
+  intuniv: Boolean(value?.intuniv),
   allkidz_probiotic: Boolean(value?.allkidz_probiotic),
   };
 };
@@ -219,6 +227,7 @@ const normalizeEveningMeds = (
 
   return {
   atomoxetine: Boolean(value?.atomoxetine),
+  intuniv: Boolean(value?.intuniv),
   leucovorin: Boolean(value?.leucovorin),
   nac: Boolean(value?.nac),
   magnesium: Boolean(value?.magnesium),

@@ -39,6 +39,7 @@ type MedicationKey =
   | "b12"
   | "nac"
   | "atomoxetine"
+  | "intuniv"
   | "magnesium"
   | "allkidz_probiotic";
 type MedicationState = Partial<Record<MedicationKey, boolean>>;
@@ -219,6 +220,7 @@ const medicationRows: { key: MedicationKey; label: string }[] = [
   { key: "b12", label: "B12" },
   { key: "nac", label: "NAC" },
   { key: "atomoxetine", label: "Atomoxetine" },
+  { key: "intuniv", label: "Intuniv" },
   { key: "leucovorin", label: "Leucovorin" },
   { key: "speakd_omega3", label: "Speak+D Omega-3" },
   { key: "nutrasea_omega3", label: "NutraSea Omega-3" },

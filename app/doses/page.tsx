@@ -11,6 +11,7 @@ type MedicationKey =
   | "b12"
   | "nac"
   | "atomoxetine"
+  | "intuniv"
   | "magnesium"
   | "allkidz_probiotic";
 type DoseTimeOfDay = "morning" | "evening";
@@ -35,6 +36,7 @@ const medicationOptions: { key: MedicationKey; label: string }[] = [
   { key: "b12", label: "B12" },
   { key: "nac", label: "NAC" },
   { key: "atomoxetine", label: "Atomoxetine" },
+  { key: "intuniv", label: "Intuniv" },
   { key: "magnesium", label: "Magnesium" },
   { key: "allkidz_probiotic", label: "AllKiDz Probiotic" },
 ];
