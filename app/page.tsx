@@ -98,6 +98,23 @@ type DailyLogRecord = {
   notes: string | null;
 };
 
+type DailyOutburstRow = {
+  id: string;
+  log_date: string;
+  period: "morning" | "evening";
+  occurrence_order: number;
+  outburst_time: string | null;
+  outburst_minutes: number | null;
+  outburst_trigger: Exclude<OutburstTriggerOption, ""> | null;
+};
+
+type OutburstEntry = {
+  localId: string;
+  time: string;
+  duration: string;
+  trigger: OutburstTriggerOption;
+};
+
 const initialMorningMeds: Record<MorningMedicationKey, boolean> = {
   leucovorin: false,
   speakd_omega3: false,
@@ -159,6 +176,16 @@ const outburstTriggerOptions: Exclude<OutburstTriggerOption, "">[] = [
   "Atomoxetine",
 ];
 
+const createOutburstEntry = (): OutburstEntry => ({
+  localId:
+    typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random()}`,
+  time: "",
+  duration: "",
+  trigger: "",
+});
+
 const getTorontoOffset = () => {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: "America/Toronto",
@@ -182,6 +209,45 @@ const getTorontoOffset = () => {
 const toTorontoTimeWithOffset = (time: string) => {
   if (!time) return null;
   return `${time}:00${getTorontoOffset()}`;
+};
+
+const parseMinutesFromTime = (time: string) => {
+  const [hour, minute] = time.split(":");
+  if (!hour || !minute) return Number.POSITIVE_INFINITY;
+  return Number.parseInt(hour, 10) * 60 + Number.parseInt(minute, 10);
+};
+
+const aggregateOutburstsForLegacyFields = (entries: OutburstEntry[]) => {
+  const filledEntries = entries.filter(
+    (entry) => entry.time || entry.duration || entry.trigger,
+  );
+
+  if (filledEntries.length === 0) {
+    return {
+      hadOutburst: false,
+      minutes: null as number | null,
+      time: null as string | null,
+      trigger: null as Exclude<OutburstTriggerOption, ""> | null,
+    };
+  }
+
+  const durationSum = filledEntries.reduce((sum, entry) => {
+    const minutes = Number.parseInt(entry.duration, 10);
+    return Number.isFinite(minutes) ? sum + minutes : sum;
+  }, 0);
+
+  const earliestWithTime = [...filledEntries]
+    .filter((entry) => entry.time)
+    .sort((a, b) => parseMinutesFromTime(a.time) - parseMinutesFromTime(b.time))[0];
+
+  const firstTrigger = filledEntries.find((entry) => entry.trigger)?.trigger ?? null;
+
+  return {
+    hadOutburst: true,
+    minutes: durationSum > 0 ? durationSum : null,
+    time: earliestWithTime?.time ? toTorontoTimeWithOffset(earliestWithTime.time) : null,
+    trigger: firstTrigger ? (firstTrigger as Exclude<OutburstTriggerOption, "">) : null,
+  };
 };
 
 const getTorontoDate = () =>
@@ -295,18 +361,10 @@ export default function Home() {
   const [sleepQuality, setSleepQuality] = useState<number>(0);
   const [morningMood, setMorningMood] = useState<MoodOption>("");
   const [morningHadOutburst, setMorningHadOutburst] = useState<boolean>(false);
-  const [morningOutburstTime, setMorningOutburstTime] = useState<string>("");
-  const [morningOutburstTrigger, setMorningOutburstTrigger] =
-    useState<OutburstTriggerOption>("");
-  const [morningOutburstDuration, setMorningOutburstDuration] =
-    useState<string>("");
+  const [morningOutbursts, setMorningOutbursts] = useState<OutburstEntry[]>([]);
   const [eveningMood, setEveningMood] = useState<MoodOption>("");
   const [eveningHadOutburst, setEveningHadOutburst] = useState<boolean>(false);
-  const [eveningOutburstTime, setEveningOutburstTime] = useState<string>("");
-  const [eveningOutburstTrigger, setEveningOutburstTrigger] =
-    useState<OutburstTriggerOption>("");
-  const [eveningOutburstDuration, setEveningOutburstDuration] =
-    useState<string>("");
+  const [eveningOutbursts, setEveningOutbursts] = useState<OutburstEntry[]>([]);
   const [morningAppetite, setMorningAppetite] = useState<AppetiteOption>("");
   const [eveningAppetite, setEveningAppetite] = useState<AppetiteOption>("");
   const [morningMeds, setMorningMeds] =
@@ -337,19 +395,18 @@ export default function Home() {
     [activeDoses],
   );
 
-  const applyRecordToForm = (record: DailyLogRecord | null) => {
+  const applyRecordToForm = (
+    record: DailyLogRecord | null,
+    outburstRows: DailyOutburstRow[] = [],
+  ) => {
     if (!record) {
       setSleepQuality(0);
       setMorningMood("");
       setMorningHadOutburst(false);
-      setMorningOutburstTime("");
-      setMorningOutburstTrigger("");
-      setMorningOutburstDuration("");
+      setMorningOutbursts([]);
       setEveningMood("");
       setEveningHadOutburst(false);
-      setEveningOutburstTime("");
-      setEveningOutburstTrigger("");
-      setEveningOutburstDuration("");
+      setEveningOutbursts([]);
       setMorningAppetite("");
       setEveningAppetite("");
       setMorningMeds({ ...initialMorningMeds });
@@ -360,31 +417,74 @@ export default function Home() {
       return;
     }
 
+    const morningRows = outburstRows
+      .filter((row) => row.period === "morning")
+      .sort((a, b) => a.occurrence_order - b.occurrence_order)
+      .map((row) => ({
+        localId: row.id,
+        time: fromStoredTimeToDropdown(row.outburst_time),
+        duration: row.outburst_minutes != null ? String(row.outburst_minutes) : "",
+        trigger: (row.outburst_trigger ?? "") as OutburstTriggerOption,
+      }));
+    const eveningRows = outburstRows
+      .filter((row) => row.period === "evening")
+      .sort((a, b) => a.occurrence_order - b.occurrence_order)
+      .map((row) => ({
+        localId: row.id,
+        time: fromStoredTimeToDropdown(row.outburst_time),
+        duration: row.outburst_minutes != null ? String(row.outburst_minutes) : "",
+        trigger: (row.outburst_trigger ?? "") as OutburstTriggerOption,
+      }));
+
+    const legacyMorningEntry =
+      record.morning_outburst_time || record.morning_outburst_minutes || record.morning_outburst_trigger
+        ? [
+            {
+              localId: "legacy-morning",
+              time: fromStoredTimeToDropdown(record.morning_outburst_time),
+              duration:
+                record.morning_outburst_minutes != null
+                  ? String(record.morning_outburst_minutes)
+                  : "",
+              trigger: (record.morning_outburst_trigger ?? "") as OutburstTriggerOption,
+            } satisfies OutburstEntry,
+          ]
+        : [];
+    const legacyEveningEntry =
+      record.evening_outburst_time || record.evening_outburst_minutes || record.evening_outburst_trigger
+        ? [
+            {
+              localId: "legacy-evening",
+              time: fromStoredTimeToDropdown(record.evening_outburst_time),
+              duration:
+                record.evening_outburst_minutes != null
+                  ? String(record.evening_outburst_minutes)
+                  : "",
+              trigger: (record.evening_outburst_trigger ?? "") as OutburstTriggerOption,
+            } satisfies OutburstEntry,
+          ]
+        : [];
+
+    const resolvedMorningOutbursts =
+      morningRows.length > 0 ? morningRows : legacyMorningEntry;
+    const resolvedEveningOutbursts =
+      eveningRows.length > 0 ? eveningRows : legacyEveningEntry;
+
     setSleepQuality(record.sleep_quality ?? 0);
     setMorningMood(sanitizeStoredMood(record.morning_mood));
     setMorningHadOutburst(
       record.morning_had_outburst ||
       record.morning_mood === "Outburst" ||
-        record.morning_outburst_minutes != null ||
-        record.morning_outburst_time != null,
+        resolvedMorningOutbursts.length > 0,
     );
-    setMorningOutburstTime(fromStoredTimeToDropdown(record.morning_outburst_time));
-    setMorningOutburstTrigger(record.morning_outburst_trigger ?? "");
-    setMorningOutburstDuration(
-      record.morning_outburst_minutes ? String(record.morning_outburst_minutes) : "",
-    );
+    setMorningOutbursts(resolvedMorningOutbursts);
     setEveningMood(sanitizeStoredMood(record.evening_mood));
     setEveningHadOutburst(
       record.evening_had_outburst ||
       record.evening_mood === "Outburst" ||
-        record.evening_outburst_minutes != null ||
-        record.evening_outburst_time != null,
+        resolvedEveningOutbursts.length > 0,
     );
-    setEveningOutburstTime(fromStoredTimeToDropdown(record.evening_outburst_time));
-    setEveningOutburstTrigger(record.evening_outburst_trigger ?? "");
-    setEveningOutburstDuration(
-      record.evening_outburst_minutes ? String(record.evening_outburst_minutes) : "",
-    );
+    setEveningOutbursts(resolvedEveningOutbursts);
     setMorningAppetite(record.morning_appetite ?? "");
     setEveningAppetite(record.evening_appetite ?? "");
     setMorningMeds(normalizeMorningMeds(record.morning_meds));
@@ -406,7 +506,7 @@ export default function Home() {
         return;
       }
 
-      const [dailyLogResult, doseChangesResult] = await Promise.all([
+      const [dailyLogResult, doseChangesResult, outburstsResult] = await Promise.all([
         supabase
           .from("daily_logs")
           .select(
@@ -422,12 +522,25 @@ export default function Home() {
           .lte("effective_date", selectedLogDate)
           .order("effective_date", { ascending: false })
           .order("changed_at", { ascending: false }),
+        supabase
+          .from("daily_log_outbursts")
+          .select(
+            "id, log_date, period, occurrence_order, outburst_time, outburst_minutes, outburst_trigger",
+          )
+          .eq("log_date", selectedLogDate)
+          .order("period", { ascending: true })
+          .order("occurrence_order", { ascending: true }),
       ]);
 
       if (!dailyLogResult.error && dailyLogResult.data) {
         const record = dailyLogResult.data as DailyLogRecord;
         setTodaysLog(record);
-        applyRecordToForm(record);
+        applyRecordToForm(
+          record,
+          ((outburstsResult.data as DailyOutburstRow[] | null) ?? []),
+        );
+      } else if (!dailyLogResult.error && !dailyLogResult.data) {
+        applyRecordToForm(null);
       }
 
       if (!doseChangesResult.error && doseChangesResult.data) {
@@ -474,6 +587,70 @@ export default function Home() {
     }));
   };
 
+  const handleToggleMorningOutburst = (checked: boolean) => {
+    setMorningHadOutburst(checked);
+    if (checked) {
+      setMorningOutbursts((prev) => (prev.length > 0 ? prev : [createOutburstEntry()]));
+      return;
+    }
+    setMorningOutbursts([]);
+  };
+
+  const handleToggleEveningOutburst = (checked: boolean) => {
+    setEveningHadOutburst(checked);
+    if (checked) {
+      setEveningOutbursts((prev) => (prev.length > 0 ? prev : [createOutburstEntry()]));
+      return;
+    }
+    setEveningOutbursts([]);
+  };
+
+  const updateMorningOutburstEntry = (
+    localId: string,
+    field: keyof Omit<OutburstEntry, "localId">,
+    value: string,
+  ) => {
+    setMorningOutbursts((prev) =>
+      prev.map((entry) =>
+        entry.localId === localId ? { ...entry, [field]: value } : entry,
+      ),
+    );
+  };
+
+  const updateEveningOutburstEntry = (
+    localId: string,
+    field: keyof Omit<OutburstEntry, "localId">,
+    value: string,
+  ) => {
+    setEveningOutbursts((prev) =>
+      prev.map((entry) =>
+        entry.localId === localId ? { ...entry, [field]: value } : entry,
+      ),
+    );
+  };
+
+  const addMorningOutburstEntry = () =>
+    setMorningOutbursts((prev) => [...prev, createOutburstEntry()]);
+
+  const addEveningOutburstEntry = () =>
+    setEveningOutbursts((prev) => [...prev, createOutburstEntry()]);
+
+  const removeMorningOutburstEntry = (localId: string) => {
+    setMorningOutbursts((prev) => {
+      const next = prev.filter((entry) => entry.localId !== localId);
+      if (next.length === 0) setMorningHadOutburst(false);
+      return next;
+    });
+  };
+
+  const removeEveningOutburstEntry = (localId: string) => {
+    setEveningOutbursts((prev) => {
+      const next = prev.filter((entry) => entry.localId !== localId);
+      if (next.length === 0) setEveningHadOutburst(false);
+      return next;
+    });
+  };
+
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
@@ -514,53 +691,29 @@ export default function Home() {
       eveningMedsTouched && resolvedEveningMeds
         ? buildDoseSnapshot(resolvedEveningMeds, "evening", activeDoses)
         : (todaysLog?.evening_doses ?? null);
+    const morningEntriesForSave = morningHadOutburst ? morningOutbursts : [];
+    const eveningEntriesForSave = eveningHadOutburst ? eveningOutbursts : [];
+    const morningOutburstAggregate =
+      aggregateOutburstsForLegacyFields(morningEntriesForSave);
+    const eveningOutburstAggregate =
+      aggregateOutburstsForLegacyFields(eveningEntriesForSave);
 
     const payload: DailyLogRecord = {
       log_date: selectedLogDate,
       sleep_quality: sleepQuality > 0 ? sleepQuality : (todaysLog?.sleep_quality ?? null),
       morning_mood: resolvedMorningMood,
-      morning_had_outburst: morningHadOutburst,
-      morning_outburst_minutes:
-        morningHadOutburst
-          ? morningOutburstDuration
-            ? Number.parseInt(morningOutburstDuration, 10)
-            : (todaysLog?.morning_outburst_minutes ?? null)
-          : null,
-      morning_outburst_time:
-        morningHadOutburst
-          ? morningOutburstTime
-            ? toTorontoTimeWithOffset(morningOutburstTime)
-            : (todaysLog?.morning_outburst_time ?? null)
-          : null,
-      morning_outburst_trigger:
-        morningHadOutburst
-          ? morningOutburstTrigger
-            ? morningOutburstTrigger
-            : (todaysLog?.morning_outburst_trigger ?? null)
-          : null,
+      morning_had_outburst: morningOutburstAggregate.hadOutburst,
+      morning_outburst_minutes: morningOutburstAggregate.minutes,
+      morning_outburst_time: morningOutburstAggregate.time,
+      morning_outburst_trigger: morningOutburstAggregate.trigger,
       morning_appetite: morningAppetite || todaysLog?.morning_appetite || null,
       morning_meds: resolvedMorningMeds,
       morning_doses: resolvedMorningDoses,
       evening_mood: resolvedEveningMood,
-      evening_had_outburst: eveningHadOutburst,
-      evening_outburst_minutes:
-        eveningHadOutburst
-          ? eveningOutburstDuration
-            ? Number.parseInt(eveningOutburstDuration, 10)
-            : (todaysLog?.evening_outburst_minutes ?? null)
-          : null,
-      evening_outburst_time:
-        eveningHadOutburst
-          ? eveningOutburstTime
-            ? toTorontoTimeWithOffset(eveningOutburstTime)
-            : (todaysLog?.evening_outburst_time ?? null)
-          : null,
-      evening_outburst_trigger:
-        eveningHadOutburst
-          ? eveningOutburstTrigger
-            ? eveningOutburstTrigger
-            : (todaysLog?.evening_outburst_trigger ?? null)
-          : null,
+      evening_had_outburst: eveningOutburstAggregate.hadOutburst,
+      evening_outburst_minutes: eveningOutburstAggregate.minutes,
+      evening_outburst_time: eveningOutburstAggregate.time,
+      evening_outburst_trigger: eveningOutburstAggregate.trigger,
       evening_appetite: eveningAppetite || todaysLog?.evening_appetite || null,
       evening_meds: resolvedEveningMeds,
       evening_doses: resolvedEveningDoses,
@@ -581,9 +734,57 @@ export default function Home() {
         return;
       }
 
+      const outburstRowsPayload = [
+        ...morningEntriesForSave.map((entry, index) => ({
+          log_date: selectedLogDate,
+          period: "morning" as const,
+          occurrence_order: index,
+          outburst_time: entry.time ? toTorontoTimeWithOffset(entry.time) : null,
+          outburst_minutes: entry.duration ? Number.parseInt(entry.duration, 10) : null,
+          outburst_trigger: entry.trigger || null,
+        })),
+        ...eveningEntriesForSave.map((entry, index) => ({
+          log_date: selectedLogDate,
+          period: "evening" as const,
+          occurrence_order: index,
+          outburst_time: entry.time ? toTorontoTimeWithOffset(entry.time) : null,
+          outburst_minutes: entry.duration ? Number.parseInt(entry.duration, 10) : null,
+          outburst_trigger: entry.trigger || null,
+        })),
+      ].filter(
+        (entry) =>
+          entry.outburst_time != null ||
+          entry.outburst_minutes != null ||
+          entry.outburst_trigger != null,
+      );
+
+      const { error: deleteOutburstsError } = await supabase
+        .from("daily_log_outbursts")
+        .delete()
+        .eq("log_date", selectedLogDate);
+
+      if (deleteOutburstsError) {
+        alert(`Saved log, but failed to refresh outbursts: ${deleteOutburstsError.message}`);
+      } else if (outburstRowsPayload.length > 0) {
+        const { error: insertOutburstsError } = await supabase
+          .from("daily_log_outbursts")
+          .insert(outburstRowsPayload);
+        if (insertOutburstsError) {
+          alert(`Saved log, but failed to save outbursts: ${insertOutburstsError.message}`);
+        }
+      }
+
       const savedRecord = data as DailyLogRecord;
       setTodaysLog(savedRecord);
-      applyRecordToForm(savedRecord);
+      const { data: refreshedOutbursts } = await supabase
+        .from("daily_log_outbursts")
+        .select(
+          "id, log_date, period, occurrence_order, outburst_time, outburst_minutes, outburst_trigger",
+        )
+        .eq("log_date", selectedLogDate)
+        .order("period", { ascending: true })
+        .order("occurrence_order", { ascending: true });
+      applyRecordToForm(savedRecord, (refreshedOutbursts as DailyOutburstRow[] | null) ?? []);
       alert("Log Saved!");
     } catch {
       alert("Failed to save log due to a network error.");
@@ -746,7 +947,9 @@ export default function Home() {
                   <input
                     type="checkbox"
                     checked={morningHadOutburst}
-                    onChange={(event) => setMorningHadOutburst(event.target.checked)}
+                    onChange={(event) =>
+                      handleToggleMorningOutburst(event.target.checked)
+                    }
                     className="h-4 w-4 rounded border-gray-300 text-slate-900 focus:ring-slate-600"
                   />
                   Yusuf had outburst?
@@ -755,76 +958,105 @@ export default function Home() {
               </div>
 
               {morningHadOutburst && (
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div className="space-y-3">
+                  {morningOutbursts.map((entry, index) => (
+                    <div
+                      key={entry.localId}
+                      className="rounded-lg border border-gray-200 bg-white p-3"
+                    >
+                      <div className="mb-2 flex items-center justify-between">
+                        <p className="text-sm font-medium text-gray-700">
+                          Morning Outburst #{index + 1}
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => removeMorningOutburstEntry(entry.localId)}
+                          className="rounded-md border border-red-300 px-2 py-1 text-xs font-medium text-red-700 transition hover:bg-red-50"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                        <div>
+                          <label className="mb-2 block text-sm font-medium text-gray-700">
+                            Outburst Time (Toronto)
+                            {todaysLog?.morning_outburst_time && index === 0 && <SavedBadge />}
+                          </label>
+                          <select
+                            value={entry.time}
+                            onChange={(event) =>
+                              updateMorningOutburstEntry(
+                                entry.localId,
+                                "time",
+                                event.target.value,
+                              )
+                            }
+                            className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-300"
+                          >
+                            <option value="">Select time</option>
+                            {outburstTimeOptions.map((time) => (
+                              <option key={time} value={time}>
+                                {time}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="mb-2 block text-sm font-medium text-gray-700">
+                            Potential Trigger
+                            {todaysLog?.morning_outburst_trigger && index === 0 && <SavedBadge />}
+                          </label>
+                          <select
+                            value={entry.trigger}
+                            onChange={(event) =>
+                              updateMorningOutburstEntry(
+                                entry.localId,
+                                "trigger",
+                                event.target.value,
+                              )
+                            }
+                            className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-300"
+                          >
+                            <option value="">Select trigger</option>
+                            {outburstTriggerOptions.map((trigger) => (
+                              <option key={trigger} value={trigger}>
+                                {trigger}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="mb-2 block text-sm font-medium text-gray-700">
+                            Outburst Duration (minutes)
+                            {todaysLog?.morning_outburst_minutes != null && index === 0 && (
+                              <SavedBadge />
+                            )}
+                          </label>
+                          <input
+                            type="number"
+                            min={1}
+                            value={entry.duration}
+                            onChange={(event) =>
+                              updateMorningOutburstEntry(
+                                entry.localId,
+                                "duration",
+                                event.target.value,
+                              )
+                            }
+                            className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-300"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  ))}
                   <div>
-                    <label
-                      htmlFor="morningOutburstTime"
-                      className="mb-2 block text-sm font-medium text-gray-700"
+                    <button
+                      type="button"
+                      onClick={addMorningOutburstEntry}
+                      className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50"
                     >
-                      Outburst Time (Toronto)
-                      {todaysLog?.morning_outburst_time && <SavedBadge />}
-                    </label>
-                    <select
-                      id="morningOutburstTime"
-                      value={morningOutburstTime}
-                      onChange={(event) => setMorningOutburstTime(event.target.value)}
-                      className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-300"
-                    >
-                      <option value="">Select time</option>
-                      {outburstTimeOptions.map((time) => (
-                        <option key={time} value={time}>
-                          {time}
-                        </option>
-                      ))}
-                    </select>
-                    <p className="mt-1 text-xs text-gray-500">
-                      Saved in America/Toronto timezone.
-                    </p>
-                  </div>
-                  <div>
-                    <label
-                      htmlFor="morningOutburstTrigger"
-                      className="mb-2 block text-sm font-medium text-gray-700"
-                    >
-                      Potential Trigger
-                      {todaysLog?.morning_outburst_trigger && <SavedBadge />}
-                    </label>
-                    <select
-                      id="morningOutburstTrigger"
-                      value={morningOutburstTrigger}
-                      onChange={(event) =>
-                        setMorningOutburstTrigger(
-                          event.target.value as OutburstTriggerOption,
-                        )
-                      }
-                      className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-300"
-                    >
-                      <option value="">Select trigger</option>
-                      {outburstTriggerOptions.map((trigger) => (
-                        <option key={trigger} value={trigger}>
-                          {trigger}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label
-                      htmlFor="morningOutburstDuration"
-                      className="mb-2 block text-sm font-medium text-gray-700"
-                    >
-                      Outburst Duration (minutes)
-                      {todaysLog?.morning_outburst_minutes != null && <SavedBadge />}
-                    </label>
-                    <input
-                      id="morningOutburstDuration"
-                      type="number"
-                      min={1}
-                      value={morningOutburstDuration}
-                      onChange={(event) =>
-                        setMorningOutburstDuration(event.target.value)
-                      }
-                      className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-300"
-                    />
+                      Add Morning Outburst
+                    </button>
                   </div>
                 </div>
               )}
@@ -927,7 +1159,9 @@ export default function Home() {
                   <input
                     type="checkbox"
                     checked={eveningHadOutburst}
-                    onChange={(event) => setEveningHadOutburst(event.target.checked)}
+                    onChange={(event) =>
+                      handleToggleEveningOutburst(event.target.checked)
+                    }
                     className="h-4 w-4 rounded border-gray-300 text-slate-900 focus:ring-slate-600"
                   />
                   Yusuf had outburst?
@@ -936,76 +1170,105 @@ export default function Home() {
               </div>
 
               {eveningHadOutburst && (
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div className="space-y-3">
+                  {eveningOutbursts.map((entry, index) => (
+                    <div
+                      key={entry.localId}
+                      className="rounded-lg border border-gray-200 bg-white p-3"
+                    >
+                      <div className="mb-2 flex items-center justify-between">
+                        <p className="text-sm font-medium text-gray-700">
+                          Evening Outburst #{index + 1}
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => removeEveningOutburstEntry(entry.localId)}
+                          className="rounded-md border border-red-300 px-2 py-1 text-xs font-medium text-red-700 transition hover:bg-red-50"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                        <div>
+                          <label className="mb-2 block text-sm font-medium text-gray-700">
+                            Outburst Time (Toronto)
+                            {todaysLog?.evening_outburst_time && index === 0 && <SavedBadge />}
+                          </label>
+                          <select
+                            value={entry.time}
+                            onChange={(event) =>
+                              updateEveningOutburstEntry(
+                                entry.localId,
+                                "time",
+                                event.target.value,
+                              )
+                            }
+                            className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-300"
+                          >
+                            <option value="">Select time</option>
+                            {outburstTimeOptions.map((time) => (
+                              <option key={time} value={time}>
+                                {time}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="mb-2 block text-sm font-medium text-gray-700">
+                            Potential Trigger
+                            {todaysLog?.evening_outburst_trigger && index === 0 && <SavedBadge />}
+                          </label>
+                          <select
+                            value={entry.trigger}
+                            onChange={(event) =>
+                              updateEveningOutburstEntry(
+                                entry.localId,
+                                "trigger",
+                                event.target.value,
+                              )
+                            }
+                            className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-300"
+                          >
+                            <option value="">Select trigger</option>
+                            {outburstTriggerOptions.map((trigger) => (
+                              <option key={trigger} value={trigger}>
+                                {trigger}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="mb-2 block text-sm font-medium text-gray-700">
+                            Outburst Duration (minutes)
+                            {todaysLog?.evening_outburst_minutes != null && index === 0 && (
+                              <SavedBadge />
+                            )}
+                          </label>
+                          <input
+                            type="number"
+                            min={1}
+                            value={entry.duration}
+                            onChange={(event) =>
+                              updateEveningOutburstEntry(
+                                entry.localId,
+                                "duration",
+                                event.target.value,
+                              )
+                            }
+                            className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-300"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  ))}
                   <div>
-                    <label
-                      htmlFor="eveningOutburstTime"
-                      className="mb-2 block text-sm font-medium text-gray-700"
+                    <button
+                      type="button"
+                      onClick={addEveningOutburstEntry}
+                      className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50"
                     >
-                      Outburst Time (Toronto)
-                      {todaysLog?.evening_outburst_time && <SavedBadge />}
-                    </label>
-                    <select
-                      id="eveningOutburstTime"
-                      value={eveningOutburstTime}
-                      onChange={(event) => setEveningOutburstTime(event.target.value)}
-                      className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-300"
-                    >
-                      <option value="">Select time</option>
-                      {outburstTimeOptions.map((time) => (
-                        <option key={time} value={time}>
-                          {time}
-                        </option>
-                      ))}
-                    </select>
-                    <p className="mt-1 text-xs text-gray-500">
-                      Saved in America/Toronto timezone.
-                    </p>
-                  </div>
-                  <div>
-                    <label
-                      htmlFor="eveningOutburstTrigger"
-                      className="mb-2 block text-sm font-medium text-gray-700"
-                    >
-                      Potential Trigger
-                      {todaysLog?.evening_outburst_trigger && <SavedBadge />}
-                    </label>
-                    <select
-                      id="eveningOutburstTrigger"
-                      value={eveningOutburstTrigger}
-                      onChange={(event) =>
-                        setEveningOutburstTrigger(
-                          event.target.value as OutburstTriggerOption,
-                        )
-                      }
-                      className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-300"
-                    >
-                      <option value="">Select trigger</option>
-                      {outburstTriggerOptions.map((trigger) => (
-                        <option key={trigger} value={trigger}>
-                          {trigger}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label
-                      htmlFor="eveningOutburstDuration"
-                      className="mb-2 block text-sm font-medium text-gray-700"
-                    >
-                      Outburst Duration (minutes)
-                      {todaysLog?.evening_outburst_minutes != null && <SavedBadge />}
-                    </label>
-                    <input
-                      id="eveningOutburstDuration"
-                      type="number"
-                      min={1}
-                      value={eveningOutburstDuration}
-                      onChange={(event) =>
-                        setEveningOutburstDuration(event.target.value)
-                      }
-                      className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-300"
-                    />
+                      Add Evening Outburst
+                    </button>
                   </div>
                 </div>
               )}
