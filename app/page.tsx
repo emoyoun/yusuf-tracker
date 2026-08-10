@@ -25,10 +25,12 @@ type MorningMedicationKey =
   | "nac"
   | "atomoxetine"
   | "intuniv"
+  | "vyvanse"
   | "allkidz_probiotic";
 type EveningMedicationKey =
   | "atomoxetine"
   | "intuniv"
+  | "vyvanse"
   | "leucovorin"
   | "nac"
   | "magnesium"
@@ -43,6 +45,7 @@ type MedicationKey =
   | "nac"
   | "atomoxetine"
   | "intuniv"
+  | "vyvanse"
   | "magnesium"
   | "allkidz_probiotic";
 type DoseTimeOfDay = "morning" | "evening";
@@ -123,12 +126,14 @@ const initialMorningMeds: Record<MorningMedicationKey, boolean> = {
   nac: false,
   atomoxetine: false,
   intuniv: false,
+  vyvanse: false,
   allkidz_probiotic: false,
 };
 
 const initialEveningMeds: Record<EveningMedicationKey, boolean> = {
   atomoxetine: false,
   intuniv: false,
+  vyvanse: false,
   leucovorin: false,
   nac: false,
   magnesium: false,
@@ -145,12 +150,14 @@ const morningMedicationOptions: { key: MorningMedicationKey; label: string }[] =
   { key: "nac", label: "NAC" },
   { key: "atomoxetine", label: "Atomoxetine" },
   { key: "intuniv", label: "Intuniv" },
+  { key: "vyvanse", label: "Vyvanse" },
   { key: "allkidz_probiotic", label: "AllKiDz Probiotic" },
 ];
 
 const eveningMedicationOptions: { key: EveningMedicationKey; label: string }[] = [
   { key: "atomoxetine", label: "Atomoxetine" },
   { key: "intuniv", label: "Intuniv" },
+  { key: "vyvanse", label: "Vyvanse" },
   { key: "leucovorin", label: "Leucovorin" },
   { key: "nac", label: "NAC" },
   { key: "magnesium", label: "Magnesium" },
@@ -282,6 +289,7 @@ const normalizeMorningMeds = (
   nac: Boolean(value?.nac),
   atomoxetine: Boolean(value?.atomoxetine),
   intuniv: Boolean(value?.intuniv),
+  vyvanse: Boolean(value?.vyvanse),
   allkidz_probiotic: Boolean(value?.allkidz_probiotic),
   };
 };
@@ -294,6 +302,7 @@ const normalizeEveningMeds = (
   return {
   atomoxetine: Boolean(value?.atomoxetine),
   intuniv: Boolean(value?.intuniv),
+  vyvanse: Boolean(value?.vyvanse),
   leucovorin: Boolean(value?.leucovorin),
   nac: Boolean(value?.nac),
   magnesium: Boolean(value?.magnesium),
