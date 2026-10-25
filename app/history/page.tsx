@@ -68,12 +68,13 @@ type MedicationDoseChangeRow = {
   med_key: MedicationKey;
 };
 
-type DailyTrainingItemRow = {
+type TrainingPlanItemRow = {
   id: string;
-  label: string;
+  plan_id: string;
+  title: string;
 };
 
-type DailyTrainingLogRow = {
+type TrainingProgressRow = {
   log_date: string;
   training_item_id: string;
   is_done: boolean;
@@ -235,8 +236,8 @@ const medicationLabelByKey: Record<MedicationKey, string> = Object.fromEntries(
 
 export default function HistoryPage() {
   const [rows, setRows] = useState<ChartRow[]>([]);
-  const [trainingItems, setTrainingItems] = useState<DailyTrainingItemRow[]>([]);
-  const [trainingLogs, setTrainingLogs] = useState<DailyTrainingLogRow[]>([]);
+  const [trainingItems, setTrainingItems] = useState<TrainingPlanItemRow[]>([]);
+  const [trainingLogs, setTrainingLogs] = useState<TrainingProgressRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -262,12 +263,12 @@ export default function HistoryPage() {
           .from("medication_dose_changes")
           .select("effective_date, time_of_day, med_key"),
         supabase
-          .from("daily_training_items")
-          .select("id, label")
+          .from("training_plan_items")
+          .select("id, plan_id, title")
           .order("sort_order", { ascending: true })
           .order("created_at", { ascending: true }),
         supabase
-          .from("daily_training_item_logs")
+          .from("training_plan_progress")
           .select("log_date, training_item_id, is_done")
           .order("log_date", { ascending: true }),
       ]);
@@ -360,8 +361,8 @@ export default function HistoryPage() {
         });
 
       setRows(mappedRows);
-      setTrainingItems((trainingItemsResult.data as DailyTrainingItemRow[]) ?? []);
-      setTrainingLogs((trainingLogsResult.data as DailyTrainingLogRow[]) ?? []);
+      setTrainingItems((trainingItemsResult.data as TrainingPlanItemRow[]) ?? []);
+      setTrainingLogs((trainingLogsResult.data as TrainingProgressRow[]) ?? []);
       setLoading(false);
     };
 
@@ -573,10 +574,21 @@ export default function HistoryPage() {
     const startDate = new Date(today);
     startDate.setDate(today.getDate() - 83);
 
-    const itemLabelById = new Map(trainingItems.map((item) => [item.id, item.label]));
+    const itemById = new Map(trainingItems.map((item) => [item.id, item]));
+    const itemCountByPlanId = new Map<string, number>();
+    trainingItems.forEach((item) => {
+      itemCountByPlanId.set(item.plan_id, (itemCountByPlanId.get(item.plan_id) ?? 0) + 1);
+    });
     const completedByDate = new Map<string, Set<string>>();
+    const plansByDate = new Map<string, Set<string>>();
 
     trainingLogs.forEach((log) => {
+      const item = itemById.get(log.training_item_id);
+      if (item) {
+        const planIds = plansByDate.get(log.log_date) ?? new Set<string>();
+        planIds.add(item.plan_id);
+        plansByDate.set(log.log_date, planIds);
+      }
       if (!log.is_done) return;
       const set = completedByDate.get(log.log_date) ?? new Set<string>();
       set.add(log.training_item_id);
@@ -592,13 +604,17 @@ export default function HistoryPage() {
       const date = `${year}-${month}-${day}`;
       const completedIds = completedByDate.get(date) ?? new Set<string>();
       const completedLabels = Array.from(completedIds)
-        .map((id) => itemLabelById.get(id))
+        .map((id) => itemById.get(id)?.title)
         .filter((label): label is string => Boolean(label));
+      const totalCount = Array.from(plansByDate.get(date) ?? []).reduce(
+        (total, planId) => total + (itemCountByPlanId.get(planId) ?? 0),
+        0,
+      );
 
       return {
         date,
         completedCount: completedIds.size,
-        totalCount: trainingItems.length,
+        totalCount,
         completedLabels,
       } satisfies TrainingHeatmapDay;
     });
@@ -667,7 +683,7 @@ export default function HistoryPage() {
             </p>
             {trainingItems.length === 0 ? (
               <p className="text-sm text-gray-600">
-                No daily training items found yet.
+                No training plan items found yet.
               </p>
             ) : (
               <>
