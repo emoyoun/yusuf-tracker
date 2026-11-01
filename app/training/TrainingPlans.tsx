@@ -100,12 +100,12 @@ const parsePlanCsv = (text: string): CsvPlanItem[] => {
   const headers = rows[0].map(normalizeHeader);
   const sectionIndex = findHeaderIndex(headers, ["section", "category"]);
   const titleIndex = findHeaderIndex(headers, ["training item", "item", "title", "activity"]);
-  const instructionsIndex = findHeaderIndex(headers, [
-    "exactly what to do with example",
-    "exactly what to do",
-    "instructions",
-    "description",
-  ]);
+  const instructionsIndex = headers.findIndex(
+    (header) =>
+      header.startsWith("exactly what to do") ||
+      header === "instructions" ||
+      header === "description",
+  );
   const logPromptIndex = findHeaderIndex(headers, [
     "how to log",
     "log prompt",
@@ -138,7 +138,7 @@ const inputForPrompt = (
 
   if (prompt === "yes/no") return null;
 
-  if (prompt.includes("help level")) {
+  if (prompt.includes("help")) {
     return (
       <select
         value={progress.log_value}
